@@ -1,6 +1,16 @@
 import type { Vec } from '../util/math';
 
-export type PlaneClass = 'light' | 'medium' | 'heavy' | 'sea' | 'heli';
+export type PlaneClass = 'light' | 'medium' | 'heavy' | 'sea' | 'heli' | 'fast';
+export type PlaneFamily = 'ga' | 'turboprop' | 'regional' | 'narrow' | 'wide' | 'bizjet' | 'heli' | 'sea' | 'fighter' | 'miltransport';
+
+/** Top-down drawing description, already scaled to world units. */
+export interface Shape {
+  L: number; w: number; span: number; sweep: number; wingX: number; chord: number;
+  tailSpan: number; tailX: number;
+  engines: Array<{ x: number; y: number; kind: 'prop' | 'jet' | 'rearjet' }>;
+  hump?: boolean; floats?: boolean; rotor?: 'single' | 'tandem'; highWing?: boolean; winglets?: boolean;
+  delta?: boolean; twinTail?: boolean; canopy?: boolean; tTail?: boolean; afterburner?: boolean; afterburners?: number;
+}
 export type RunwayKind = 'short' | 'long' | 'water' | 'helipad';
 export type TimeOfDay = 'morning' | 'golden' | 'dusk' | 'night';
 
@@ -15,6 +25,11 @@ export interface PlaneType {
   windSensitivity: number;
   engines: 'prop1' | 'prop2' | 'prop4' | 'jet2' | 'jet4' | 'rotor' | 'float';
   livery: { body: string; accent: string; wing: string };
+  family: PlaneFamily;
+  shape: Shape;
+  callsign: string;
+  military: boolean;
+  fuel: number;          // seconds of fuel for urgent (military) arrivals, 0 = no urgency
   tip: string;           // shown in the post-mortem
   tipEn: string;
 }
@@ -84,6 +99,8 @@ export interface Plane {
   livery: number;
   goArounds: number;
   wanderTimer: number;
+  fuel: number;          // remaining seconds when urgent, else -1
+  urgent: boolean;
 }
 
 export interface Snapshot {
@@ -91,7 +108,7 @@ export interface Snapshot {
   planes: Array<{ id: number; x: number; y: number; h: number; state: PlaneState; alt: number; path: Vec[]; lock: string | null; cross: number }>;
 }
 
-export type EventKind = 'path' | 'lock' | 'nearmiss' | 'crash' | 'goaround' | 'landed' | 'spawn' | 'touchdown';
+export type EventKind = 'path' | 'lock' | 'nearmiss' | 'crash' | 'goaround' | 'landed' | 'spawn' | 'touchdown' | 'mayday' | 'ditch';
 export interface GameEvent {
   t: number;
   kind: EventKind;

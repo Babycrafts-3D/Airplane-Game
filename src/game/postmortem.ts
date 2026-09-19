@@ -42,8 +42,11 @@ export function buildReport(world: World): Report {
   const tips: string[] = [];
   const and = nl() ? 'en' : 'and';
 
-  const title = f.kind === 'crash' ? t('collision') : (nl() ? 'Drie bijna-botsingen' : 'Three near misses');
-  const headline = f.kind === 'crash'
+  const lastDitch = [...world.events].reverse().find(e => e.kind === 'ditch' && Math.abs(e.t - tInc) < 0.2);
+  const title = lastDitch ? (nl() ? 'Brandstof op' : 'Out of fuel') : f.kind === 'crash' ? t('collision') : (nl() ? 'Levens op' : 'Out of lives');
+  const headline = lastDitch
+    ? (nl() ? `${nameA} raakte zonder brandstof en moest op zee landen na ${formatTime(tInc)}. Dat kostte je laatste leven.` : `${nameA} ran out of fuel and ditched at sea at ${formatTime(tInc)}. That cost your last life.`)
+    : f.kind === 'crash'
     ? (nl() ? `${nameA} ${and} ${nameB} raakten elkaar na ${formatTime(tInc)}.` : `${nameA} ${and} ${nameB} collided at ${formatTime(tInc)}.`)
     : (nl() ? `De derde bijna-botsing (${nameA} ${and} ${nameB}, ${Math.round(f.gap)} m) kostte je laatste leven na ${formatTime(tInc)}.` : `The third near miss (${nameA} ${and} ${nameB}, ${Math.round(f.gap)} m) cost your last life at ${formatTime(tInc)}.`);
 
@@ -115,6 +118,12 @@ export function buildReport(world: World): Report {
       ? `De wind (${Math.round(world.wind.kmh)} km/u) duwde <strong>${who}</strong> ${Math.round(Math.max(crossA, crossB))} m van de getekende lijn af. Bij wind is een route geen garantie: houd extra marge aan de lijzijde.`
       : `The wind (${Math.round(world.wind.kmh)} km/h) pushed <strong>${who}</strong> ${Math.round(Math.max(crossA, crossB))} m off the drawn line. In wind a route is no guarantee: keep extra margin on the downwind side.`);
   }
+  const ditched = world.events.filter(e => e.kind === 'ditch');
+  if (ditched.length) {
+    causes.push(nl()
+      ? `<strong>${ditched.map(d => d.text.split(':')[0]).join(', ')}</strong> kwam zonder brandstof te zitten. Militaire toestellen met een brandstoftimer hebben voorrang: land ze meteen, ook als je daarvoor een ander toestel een rondje moet laten vliegen.`
+      : `<strong>${ditched.map(d => d.text.split(':')[0]).join(', ')}</strong> ran out of fuel. Military aircraft with a fuel timer have priority: land them immediately, even if another aircraft has to fly a circle for it.`);
+  }
   if (f.kind === 'hearts') {
     const misses = world.events.filter(e => e.kind === 'nearmiss');
     causes.push(nl()
@@ -140,7 +149,7 @@ export function buildReport(world: World): Report {
   // --- timeline ---
   const timeline: ReportLine[] = world.events
     .filter(e => e.t >= tInc - 25 && e.kind !== 'spawn')
-    .map(e => ({ t: e.t, text: e.text, bad: e.kind === 'nearmiss' || e.kind === 'crash' || e.kind === 'goaround' }));
+    .map(e => ({ t: e.t, text: e.text, bad: e.kind === 'nearmiss' || e.kind === 'crash' || e.kind === 'goaround' || e.kind === 'ditch' || e.kind === 'mayday' }));
 
   return { title, headline, causes, tips, timeline, involved: [idA, idB], tIncident: tInc, gap: f.gap, kind: f.kind };
 }

@@ -327,11 +327,15 @@ export class World {
         id: this.nextId++, type, pos, heading, speed: type.speed, state: 'flying', path: [], pathIndex: 0,
         lockedRunway: null, pathDrawnAt: -1, landingT: 0, runway: null, altitude: 1, crossTrack: 0,
         spawnedAt: this.time, trail: [], conflictWith: new Set(), bank: 0, livery: Math.floor(this.rng() * 3), goArounds: 0,
-        wanderTimer: 0,
+        wanderTimer: 0, fuel: type.fuel > 0 && !this.demo ? type.fuel : -1, urgent: type.fuel > 0 && !this.demo,
       };
       this.planes.push(plane);
       this.puffs.push({ pos: { ...pos }, t0: this.time, kind: 'spawn', dir: heading });
       this.pushEvent('spawn', [plane.id], type.name);
+      if (plane.urgent) {
+        this.toast(`${type.name}: ${lang() === 'nl' ? 'brandstof voor' : 'fuel for'} ${Math.round(plane.fuel)} s`, 'warn', 3);
+        this.pushEvent('mayday', [plane.id], `${type.name}: ${lang() === 'nl' ? 'voorrang, brandstoftekort' : 'priority, low fuel'}`, { fuel: Math.round(plane.fuel) });
+      }
       return true;
     }
     return false;
@@ -363,6 +367,10 @@ export class World {
   private updatePlane(p: Plane, dt: number): void {
     if (p.state === 'crashed' || p.state === 'landed') return;
     if (p.state === 'landing') { this.updateLanding(p, dt); return; }
+    if (p.urgent && p.fuel > 0) {
+      p.fuel -= dt;
+      if (p.fuel <= 0) { this.ditch(p); return; }
+    }
 
     let desired = p.heading;
     let turnScale = 1;
@@ -496,7 +504,8 @@ export class World {
       p.landingT = this.time; // reused as "landed at" timestamp for cleanup
       if (rw.occupiedBy === p.id) rw.occupiedBy = null;
       this.landed++;
-      if (!this.demo) this.coinsEarned += Math.round(6 * this.fx.coinMultiplier);
+      if (!this.demo) this.coinsEarned += Math.round((p.urgent ? 18 : 6) * this.fx.coinMultiplier);
+      if (p.urgent) this.toast(`${p.type.name}: ${lang() === 'nl' ? 'veilig binnen, bonus' : 'safe, bonus'} +${Math.round(12 * this.fx.coinMultiplier)}`, 'good', 2.5);
       this.pushEvent('landed', [p.id], `${p.type.name} ${t('landed').toLowerCase()}`);
       this.puffs.push({ pos: { ...p.pos }, t0: this.time, kind: 'land' });
       sfx.landed(); haptic('light');
@@ -540,6 +549,22 @@ export class World {
     if (this.hearts <= 0) {
       this.status = 'failed';
       this.failure = { kind: 'hearts', planes: [a.id, b.id], t: this.time, gap: g };
+    }
+  }
+
+  /** An urgent arrival ran out of fuel: it is lost and costs a life. */
+  private ditch(p: Plane): void {
+    p.state = 'crashed';
+    p.landingT = this.time;
+    p.urgent = false;
+    this.puffs.push({ pos: { ...p.pos }, t0: this.time, kind: 'crash' });
+    this.hearts--;
+    this.pushEvent('ditch', [p.id], `${p.type.name}: ${lang() === 'nl' ? 'brandstof op, noodlanding op zee' : 'out of fuel, ditched at sea'}`);
+    this.toast(`${p.type.name}: ${lang() === 'nl' ? 'brandstof op' : 'out of fuel'}`, 'bad', 3);
+    sfx.crash(); haptic('heavy');
+    if (this.hearts <= 0) {
+      this.status = 'failed';
+      this.failure = { kind: 'hearts', planes: [p.id, p.id], t: this.time, gap: 0 };
     }
   }
 

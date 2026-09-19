@@ -139,6 +139,19 @@ export class Renderer {
     for (const p of sorted) {
       if (p.state === 'crashed') continue;
       drawPlane(ctx, planeView(p), time, pal.lightsOn);
+      if (p.urgent && p.fuel > 0 && p.state === 'flying') {
+        const frac = p.fuel / p.type.fuel;
+        const r = p.type.hull + RING_EXTRA + 6;
+        const hot = p.fuel < 15;
+        ctx.strokeStyle = hot ? `rgba(255,80,80,${0.6 + 0.4 * Math.sin(time * 10)})` : 'rgba(255,190,60,0.9)'; ctx.lineWidth = 3 * px; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.arc(p.pos.x, p.pos.y, r, -Math.PI / 2, -Math.PI / 2 + TAU * frac); ctx.stroke();
+        ctx.font = `900 ${12 * px}px Nunito, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const label = `${Math.ceil(p.fuel)} s`;
+        const w = ctx.measureText(label).width + 12 * px, h = 18 * px;
+        ctx.fillStyle = hot ? 'rgba(200,30,60,0.95)' : 'rgba(180,110,10,0.9)';
+        ctx.beginPath(); ctx.roundRect(p.pos.x - w / 2, p.pos.y - r - h - 4 * px, w, h, h / 2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.fillText(label, p.pos.x, p.pos.y - r - h / 2 - 4 * px);
+      }
       if (world.selected === p.id && world.selectedUntil > world.time && p.state === 'flying') {
         ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2 * px; ctx.setLineDash([6 * px, 5 * px]); ctx.lineDashOffset = -time * 30;
         ctx.beginPath(); ctx.arc(p.pos.x, p.pos.y, p.type.hull + 12 + Math.sin(time * 4) * 2, 0, TAU); ctx.stroke(); ctx.setLineDash([]);

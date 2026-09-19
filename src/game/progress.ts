@@ -17,6 +17,64 @@ export const missionId = (worldId: string, index: number): string => `${worldId}
 
 const TIMES: TimeOfDay[] = ['morning', 'golden', 'dusk', 'night'];
 
+type Pool = Array<{ type: string; weight: number }>;
+
+/**
+ * The real-world fleet, introduced gradually. Each world lists the aircraft that may appear,
+ * with the mission index from which they are unlocked and their spawn weight.
+ */
+const FLEET: Array<Array<{ type: string; from: number; weight: number }>> = [
+  // 0 Lindeneiland: short strip, light aircraft only
+  [
+    { type: 'c172', from: 0, weight: 3 }, { type: 'pa28', from: 0, weight: 2 }, { type: 'da40', from: 1, weight: 2 },
+    { type: 'dhc6', from: 2, weight: 2 }, { type: 'sr22', from: 3, weight: 2 }, { type: 'bonanza', from: 4, weight: 1 },
+    { type: 'c208', from: 4, weight: 2 }, { type: 'pc12', from: 5, weight: 2 }, { type: 'kingair', from: 6, weight: 2 },
+  ],
+  // 1 Vuurtorenbaai: long runway, turboprops and regionals
+  [
+    { type: 'c172', from: 0, weight: 1 }, { type: 'dhc6', from: 0, weight: 1 }, { type: 'kingair', from: 0, weight: 2 },
+    { type: 'atr72', from: 0, weight: 3 }, { type: 'q400', from: 1, weight: 2 }, { type: 'pc12', from: 1, weight: 1 },
+    { type: 'e175', from: 2, weight: 2 }, { type: 'crj900', from: 3, weight: 2 }, { type: 'citation', from: 3, weight: 1 },
+    { type: 'a320', from: 5, weight: 2 }, { type: 'b737', from: 6, weight: 2 },
+  ],
+  // 2 Molenrif: crosswind, narrowbodies
+  [
+    { type: 'dhc6', from: 0, weight: 1 }, { type: 'atr72', from: 0, weight: 2 }, { type: 'e195', from: 0, weight: 2 },
+    { type: 'a320', from: 0, weight: 3 }, { type: 'b737', from: 1, weight: 3 }, { type: 'q400', from: 1, weight: 1 },
+    { type: 'a321', from: 3, weight: 2 }, { type: 'g650', from: 3, weight: 1 }, { type: 'b757', from: 4, weight: 2 },
+    { type: 'b787', from: 6, weight: 2 },
+  ],
+  // 3 Tweelingzusters: short + long, the widebodies arrive, first military transport
+  [
+    { type: 'c172', from: 0, weight: 2 }, { type: 'kingair', from: 0, weight: 2 }, { type: 'atr72', from: 0, weight: 2 },
+    { type: 'e175', from: 0, weight: 1 }, { type: 'a320', from: 0, weight: 2 }, { type: 'b737', from: 1, weight: 2 },
+    { type: 'b787', from: 1, weight: 2 }, { type: 'a350', from: 2, weight: 2 }, { type: 'b777', from: 3, weight: 2 },
+    { type: 'b747', from: 4, weight: 2 }, { type: 'c130', from: 5, weight: 1 }, { type: 'a380', from: 7, weight: 1 },
+  ],
+  // 4 Zeemeerminlagune: seaplanes, heavies and the first fighters
+  [
+    { type: 'c208a', from: 0, weight: 3 }, { type: 'icona5', from: 0, weight: 2 }, { type: 'dhc6f', from: 1, weight: 2 },
+    { type: 'atr72', from: 0, weight: 1 }, { type: 'a320', from: 0, weight: 2 }, { type: 'e195', from: 0, weight: 1 },
+    { type: 'a330', from: 2, weight: 2 }, { type: 'b787', from: 2, weight: 1 }, { type: 'b747', from: 3, weight: 1 },
+    { type: 'p8', from: 4, weight: 1 }, { type: 'f16', from: 5, weight: 1 }, { type: 'a400m', from: 6, weight: 1 },
+  ],
+  // 5 Sterrenhaven: everything, helicopters, all military
+  [
+    { type: 'h135', from: 0, weight: 2 }, { type: 'r44', from: 0, weight: 1 }, { type: 'aw139', from: 1, weight: 1 },
+    { type: 'c172', from: 0, weight: 1 }, { type: 'q400', from: 0, weight: 1 }, { type: 'e195', from: 0, weight: 1 },
+    { type: 'a321', from: 0, weight: 2 }, { type: 'b777', from: 1, weight: 1 }, { type: 's92', from: 2, weight: 1 },
+    { type: 'b747', from: 2, weight: 1 }, { type: 'f16', from: 2, weight: 1 }, { type: 'c130', from: 3, weight: 1 },
+    { type: 'chinook', from: 3, weight: 1 }, { type: 'eurofighter', from: 4, weight: 1 }, { type: 'nh90', from: 5, weight: 1 },
+    { type: 'f35', from: 6, weight: 1 }, { type: 'a380', from: 6, weight: 1 }, { type: 'a400m', from: 7, weight: 1 },
+  ],
+];
+
+function poolFor(worldIndex: number, index: number, tag: MissionTag): Pool {
+  const pool: Pool = FLEET[worldIndex].filter(f => f.from <= index).map(f => ({ type: f.type, weight: f.weight }));
+  if (tag === 'heavies') for (const p of pool) if (['b747', 'a380', 'b777', 'a350', 'a330', 'b787', 'c130', 'a400m'].includes(p.type)) p.weight *= 3;
+  return pool.length ? pool : [{ type: 'c172', weight: 1 }];
+}
+
 /** Build mission `index` (0-based) of a world by scaling the island's base definition. */
 export function buildMission(worldIndex: number, index: number): LevelDef & { tag: MissionTag; index: number; worldIndex: number } {
   const base = WORLDS[worldIndex];
@@ -24,14 +82,7 @@ export function buildMission(worldIndex: number, index: number): LevelDef & { ta
   const tagOrder: MissionTag[] = ['calm', 'busy', 'golden', 'storm', 'dusk', 'heavies', 'night', 'rush'];
   const tag = tagOrder[i];
   const time: TimeOfDay = tag === 'night' ? 'night' : tag === 'dusk' ? 'dusk' : tag === 'golden' ? 'golden' : tag === 'storm' ? 'morning' : i % 2 === 0 ? base.time : TIMES[(worldIndex + i) % 4];
-  const difficulty = worldIndex * 0.35 + i * 0.12; // 0 .. ~2.6
   const goal = Math.round(base.goal * (0.75 + i * 0.09));
-  // plane pool: early missions of a world stick to the lighter half
-  const sorted = base.planes.slice();
-  let pool = sorted;
-  if (i < 2 && sorted.length > 2) pool = sorted.filter(p => !['b747', 'a320'].includes(p.type));
-  if (pool.length === 0) pool = sorted;
-  if (tag === 'heavies') pool = sorted.map(p => ({ ...p, weight: ['b747', 'a320', 'e195'].includes(p.type) ? p.weight * 3 : p.weight }));
   const s = base.spawn;
   const spawn = {
     first: 1.2,
@@ -50,14 +101,15 @@ export function buildMission(worldIndex: number, index: number): LevelDef & { ta
     id: missionId(base.id, i),
     name: `${base.name} ${i + 1}`,
     subtitle: tagName, subtitleEn: TAG_NAMES[tag][1],
-    time, goal, planes: pool, spawn, wind,
+    time, goal, planes: poolFor(worldIndex, i, tag), spawn, wind,
     clouds: base.clouds + (tag === 'storm' ? 4 : 0),
     seed: base.seed,
     tag, index: i, worldIndex,
-    // difficulty is folded into spawn/wind above; keep for display
-    ...(difficulty ? {} : {}),
   };
 }
+
+/** All aircraft that can appear on a world (for the island card). */
+export function fleetOf(worldIndex: number): string[] { return FLEET[worldIndex].map(f => f.type); }
 
 export function worldStars(worldIndex: number): number {
   let s = 0;
@@ -74,7 +126,6 @@ export function worldUnlocked(worldIndex: number): boolean {
   if (worldIndex === 0) return true;
   return worldStars(worldIndex - 1) >= 12;
 }
-/** A mission unlocks when the previous mission in its world is completed. */
 export function missionUnlocked(worldIndex: number, index: number): boolean {
   if (!worldUnlocked(worldIndex)) return false;
   if (index === 0) return true;

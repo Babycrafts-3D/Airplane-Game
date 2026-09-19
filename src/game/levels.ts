@@ -77,7 +77,7 @@ export const LEVELS: LevelDef[] = [
       { id: 'rwL', kind: 'long', x: 0.68, y: 0.68, heading: S, length: 360 },
       { id: 'rwW', kind: 'water', x: 0.20, y: 0.58, heading: S, length: 300 },
     ],
-    planes: [ { type: 'c208', weight: 3 }, { type: 'c172', weight: 1 }, { type: 'atr72', weight: 2 }, { type: 'a320', weight: 2 }, { type: 'e195', weight: 1 } ],
+    planes: [ { type: 'c208a', weight: 3 }, { type: 'c172', weight: 1 }, { type: 'atr72', weight: 2 }, { type: 'a320', weight: 2 }, { type: 'e195', weight: 1 } ],
     spawn: { first: 1.2, base: 12, min: 4.8, step: 0.5, maxConcurrent: 3, maxConcurrentEnd: 6 },
     wind: { kmh: 12, gust: 6, dirDeg: 45, wander: 20 }, clouds: 5,
   },

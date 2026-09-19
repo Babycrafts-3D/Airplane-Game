@@ -318,58 +318,82 @@ export class EngineMixer {
 
 // ---------------- ATC radio ----------------
 
-const CALLSIGNS: Record<string, string> = {
-  c172: 'Skyhawk', dhc6: 'Twin Otter', atr72: 'ATR', e195: 'Embraer', a320: 'Airbus', b747: 'Heavy Jumbo', c208: 'Caravan', h135: 'Helicopter',
-};
+export type Speaker = 'tower' | 'pilot';
 
+/** Radio chatter through speech synthesis, made to sound like a real VHF radio: squelch, static bed, two voices. */
 export class Radio {
-  private queue: Array<{ text: string; urgent: boolean; t: number }> = [];
+  private queue: Array<{ text: string; urgent: boolean; who: Speaker; t: number }> = [];
   private speaking = false;
-  private voice: SpeechSynthesisVoice | null = null;
-  private lastAt = 0;
+  private voices: Record<Speaker, SpeechSynthesisVoice | null> = { tower: null, pilot: null };
+  private static: { src: AudioBufferSourceNode; gain: GainNode } | null = null;
 
-  private pickVoice(): void {
-    if (this.voice || !('speechSynthesis' in window)) return;
-    const voices = speechSynthesis.getVoices();
-    this.voice = voices.find(v => /en-(US|GB)/i.test(v.lang) && /Google|Microsoft|Samantha|Daniel|Aria|Guy/i.test(v.name)) ?? voices.find(v => v.lang.startsWith('en')) ?? null;
+  private pickVoices(): void {
+    if (this.voices.tower || !('speechSynthesis' in window)) return;
+    const all = speechSynthesis.getVoices().filter(v => /^en(-|_)/i.test(v.lang));
+    if (!all.length) return;
+    // prefer the most natural voices the device offers (neural / premium / enhanced / Siri / Google)
+    const score = (v: SpeechSynthesisVoice): number =>
+      (/natural|neural|premium|enhanced|siri/i.test(v.name) ? 40 : 0) + (/google/i.test(v.name) ? 20 : 0) + (v.localService ? 5 : 0) + (/en-(US|GB)/i.test(v.lang) ? 10 : 0) - (/compact|espeak/i.test(v.name) ? 30 : 0);
+    const ranked = all.slice().sort((x, y) => score(y) - score(x));
+    const male = ranked.find(v => /guy|davis|daniel|george|ryan|alex|fred|tom|james|christopher|eric|brian|male/i.test(v.name));
+    const female = ranked.find(v => /aria|jenny|samantha|sonia|libby|zira|karen|moira|female|emma|olivia/i.test(v.name));
+    this.voices.tower = female ?? ranked[0];
+    this.voices.pilot = male ?? ranked.find(v => v !== this.voices.tower) ?? ranked[0];
   }
 
-  callsign(typeId: string, planeId: number): string {
+  callsign(type: { callsign: string }, planeId: number): string {
     const num = ((planeId * 37) % 900) + 100;
     const digits = String(num).split('').map(d => ['zero', 'one', 'two', 'tree', 'four', 'five', 'six', 'seven', 'eight', 'niner'][+d]).join(' ');
-    return `${CALLSIGNS[typeId] ?? 'Traffic'} ${digits}`;
+    return `${type.callsign} ${digits}`;
   }
 
-  say(text: string, urgent = false): void {
+  say(text: string, opts: { urgent?: boolean; who?: Speaker } = {}): void {
     if (!save.radio || !save.sound || !('speechSynthesis' in window)) return;
-    const now = performance.now();
-    if (!urgent && this.queue.length >= 2) return; // do not pile up chatter
-    this.queue.push({ text, urgent, t: now });
-    if (urgent) this.queue.sort((a, b) => Number(b.urgent) - Number(a.urgent));
+    const urgent = !!opts.urgent, who = opts.who ?? 'tower';
+    if (!urgent && this.queue.length >= 2) return; // no pile-up of chatter
+    this.queue.push({ text, urgent, who, t: performance.now() });
+    if (urgent) this.queue.sort((x, y) => Number(y.urgent) - Number(x.urgent));
     this.pump();
+  }
+
+  private staticOn(on: boolean): void {
+    if (!ctx || !master) return;
+    if (on && !this.static) {
+      const src = noiseSource(); if (!src) return;
+      const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1500; f.Q.value = 0.7;
+      const g = ctx.createGain(); g.gain.value = 0; g.gain.setTargetAtTime(0.05, ctx.currentTime, 0.05);
+      src.connect(f).connect(g).connect(master); src.start();
+      this.static = { src, gain: g };
+    } else if (!on && this.static) {
+      const st = this.static; this.static = null;
+      st.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
+      setTimeout(() => { try { st.src.stop(); } catch { /* ok */ } st.src.disconnect(); st.gain.disconnect(); }, 300);
+    }
   }
 
   private pump(): void {
     if (this.speaking || this.queue.length === 0) return;
     const item = this.queue.shift()!;
     if (!item.urgent && performance.now() - item.t > 6000) { this.pump(); return; }
-    this.pickVoice();
+    this.pickVoices();
     this.speaking = true;
-    sfx.squelch(true);
+    sfx.squelch(true); this.staticOn(true);
     const u = new SpeechSynthesisUtterance(item.text);
-    u.lang = 'en-US'; u.rate = 1.12; u.pitch = 0.85; u.volume = 0.75;
-    if (this.voice) u.voice = this.voice;
-    const done = (): void => { this.speaking = false; sfx.squelch(false); this.lastAt = performance.now(); setTimeout(() => this.pump(), 500); };
+    const v = this.voices[item.who];
+    u.lang = v?.lang ?? 'en-US';
+    // natural pace, no pitch shifting: pitch tricks are what makes TTS sound robotic
+    u.rate = item.who === 'pilot' ? 1.02 : 1.06; u.pitch = 1.0; u.volume = item.who === 'pilot' ? 0.7 : 0.8;
+    if (v) u.voice = v;
+    const done = (): void => { if (!this.speaking) return; this.speaking = false; this.staticOn(false); sfx.squelch(false); setTimeout(() => this.pump(), 650); };
     u.onend = done; u.onerror = done;
     try { speechSynthesis.speak(u); } catch { done(); }
-    // safety: never hang the queue
-    setTimeout(() => { if (this.speaking) done(); }, 7000);
+    setTimeout(() => { if (this.speaking) done(); }, 8000);
   }
 
   stop(): void {
     this.queue = [];
     try { speechSynthesis.cancel(); } catch { /* ok */ }
-    this.speaking = false;
+    this.speaking = false; this.staticOn(false);
   }
 }
 
@@ -377,3 +401,5 @@ export const runwayCallout = (headingRad: number): string => {
   const num = Math.round((((headingRad * 180 / Math.PI) + 90 + 360) % 360) / 10) || 36;
   return String(num).padStart(2, '0').split('').map(d => ['zero', 'one', 'two', 'tree', 'four', 'five', 'six', 'seven', 'eight', 'niner'][+d]).join(' ');
 };
+
+if ('speechSynthesis' in window) { try { speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices(); speechSynthesis.getVoices(); } catch { /* ok */ } }

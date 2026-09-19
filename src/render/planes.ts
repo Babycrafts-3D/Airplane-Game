@@ -1,4 +1,4 @@
-import type { PlaneState, PlaneType } from '../game/types';
+import type { PlaneState, PlaneType, Shape } from '../game/types';
 import type { Vec } from '../util/math';
 import { hexA, shade } from './palette';
 
@@ -13,36 +13,16 @@ export interface PlaneView {
   id: number;
 }
 
-const ALT_ACCENTS = ['#f2a541', '#5aa9e6', '#8bd17c'];
+const ALT_ACCENTS = ['#f2a541', '#5aa9e6', '#8bd17c', '#ff5f8f', '#7c5cff'];
 
 function accentFor(pv: PlaneView): string {
+  if (pv.type.military) return pv.type.livery.accent;
   return pv.livery === 0 ? pv.type.livery.accent : ALT_ACCENTS[(pv.livery + pv.id) % ALT_ACCENTS.length];
 }
 
 export const planeScale = (alt: number): number => 0.74 + 0.26 * alt;
 
-interface Geo {
-  L: number; w: number; span: number; sweep: number; wingX: number; chord: number;
-  tailSpan: number; tailX: number; engines: Array<{ x: number; y: number; kind: 'prop' | 'jet' }>;
-  hump: boolean; floats: boolean; rotor: boolean; highWing: boolean; winglets: boolean;
-}
-
-function geo(t: PlaneType): Geo {
-  const h = t.hull;
-  switch (t.id) {
-    case 'c172': return { L: 2.4 * h, w: 0.36 * h, span: 2.7 * h, sweep: 0, wingX: 0.2 * h, chord: 0.55 * h, tailSpan: 1.05 * h, tailX: -1.0 * h, engines: [{ x: 1.15 * h, y: 0, kind: 'prop' }], hump: false, floats: false, rotor: false, highWing: true, winglets: false };
-    case 'dhc6': return { L: 2.6 * h, w: 0.38 * h, span: 3.0 * h, sweep: 0, wingX: 0.15 * h, chord: 0.5 * h, tailSpan: 1.1 * h, tailX: -1.1 * h, engines: [{ x: 0.55 * h, y: -0.85 * h, kind: 'prop' }, { x: 0.55 * h, y: 0.85 * h, kind: 'prop' }], hump: false, floats: false, rotor: false, highWing: true, winglets: false };
-    case 'atr72': return { L: 2.9 * h, w: 0.4 * h, span: 2.8 * h, sweep: 0, wingX: 0.1 * h, chord: 0.5 * h, tailSpan: 1.1 * h, tailX: -1.25 * h, engines: [{ x: 0.5 * h, y: -0.8 * h, kind: 'prop' }, { x: 0.5 * h, y: 0.8 * h, kind: 'prop' }], hump: false, floats: false, rotor: false, highWing: true, winglets: false };
-    case 'e195': return { L: 3.1 * h, w: 0.42 * h, span: 2.7 * h, sweep: 0.55 * h, wingX: 0.05 * h, chord: 0.6 * h, tailSpan: 1.0 * h, tailX: -1.3 * h, engines: [{ x: 0.35 * h, y: -0.7 * h, kind: 'jet' }, { x: 0.35 * h, y: 0.7 * h, kind: 'jet' }], hump: false, floats: false, rotor: false, highWing: false, winglets: true };
-    case 'a320': return { L: 3.1 * h, w: 0.45 * h, span: 2.9 * h, sweep: 0.6 * h, wingX: 0.0, chord: 0.65 * h, tailSpan: 1.05 * h, tailX: -1.3 * h, engines: [{ x: 0.3 * h, y: -0.75 * h, kind: 'jet' }, { x: 0.3 * h, y: 0.75 * h, kind: 'jet' }], hump: false, floats: false, rotor: false, highWing: false, winglets: true };
-    case 'b747': return { L: 3.3 * h, w: 0.5 * h, span: 3.1 * h, sweep: 0.75 * h, wingX: -0.05 * h, chord: 0.75 * h, tailSpan: 1.15 * h, tailX: -1.4 * h, engines: [{ x: 0.35 * h, y: -0.62 * h, kind: 'jet' }, { x: 0.05 * h, y: -1.1 * h, kind: 'jet' }, { x: 0.35 * h, y: 0.62 * h, kind: 'jet' }, { x: 0.05 * h, y: 1.1 * h, kind: 'jet' }], hump: true, floats: false, rotor: false, highWing: false, winglets: true };
-    case 'c208': return { L: 2.6 * h, w: 0.38 * h, span: 2.9 * h, sweep: 0, wingX: 0.2 * h, chord: 0.55 * h, tailSpan: 1.05 * h, tailX: -1.1 * h, engines: [{ x: 1.25 * h, y: 0, kind: 'prop' }], hump: false, floats: true, rotor: false, highWing: true, winglets: false };
-    case 'h135': return { L: 2.1 * h, w: 0.55 * h, span: 0, sweep: 0, wingX: 0, chord: 0, tailSpan: 0.6 * h, tailX: -1.55 * h, engines: [], hump: false, floats: false, rotor: true, highWing: false, winglets: false };
-  }
-  return { L: 2.6 * h, w: 0.4 * h, span: 2.8 * h, sweep: 0, wingX: 0, chord: 0.5 * h, tailSpan: 1.0 * h, tailX: -1.1 * h, engines: [], hump: false, floats: false, rotor: false, highWing: true, winglets: false };
-}
-
-function fuselagePath(ctx: CanvasRenderingContext2D, g: Geo): void {
+function fuselagePath(ctx: CanvasRenderingContext2D, g: Shape): void {
   const L = g.L, w = g.w;
   ctx.beginPath();
   ctx.moveTo(L / 2, 0);
@@ -56,9 +36,30 @@ function fuselagePath(ctx: CanvasRenderingContext2D, g: Geo): void {
   ctx.closePath();
 }
 
-function wingPath(ctx: CanvasRenderingContext2D, g: Geo, side: 1 | -1): void {
+function fighterFuselagePath(ctx: CanvasRenderingContext2D, g: Shape): void {
+  const L = g.L, w = g.w;
+  ctx.beginPath();
+  ctx.moveTo(L / 2, 0);
+  ctx.lineTo(L * 0.2, -w * 0.9);
+  ctx.lineTo(-L * 0.35, -w * 1.05);
+  ctx.lineTo(-L / 2, -w * 0.7);
+  ctx.lineTo(-L / 2, w * 0.7);
+  ctx.lineTo(-L * 0.35, w * 1.05);
+  ctx.lineTo(L * 0.2, w * 0.9);
+  ctx.closePath();
+}
+
+function wingPath(ctx: CanvasRenderingContext2D, g: Shape, side: 1 | -1): void {
   const half = g.span / 2, c = g.chord, s = g.sweep, x0 = g.wingX;
   ctx.beginPath();
+  if (g.delta) {
+    ctx.moveTo(x0 + c * 0.9, side * g.w * 0.7);
+    ctx.lineTo(x0 - c * 0.55, side * half);
+    ctx.lineTo(x0 - c * 0.75, side * half);
+    ctx.lineTo(x0 - c * 0.75, side * g.w * 0.7);
+    ctx.closePath();
+    return;
+  }
   ctx.moveTo(x0 + c * 0.6, side * g.w * 0.6);
   ctx.lineTo(x0 + c * 0.6 - s, side * half);
   ctx.lineTo(x0 - c * 0.5 - s * 1.05, side * half);
@@ -66,7 +67,7 @@ function wingPath(ctx: CanvasRenderingContext2D, g: Geo, side: 1 | -1): void {
   ctx.closePath();
 }
 
-function tailPath(ctx: CanvasRenderingContext2D, g: Geo, side: 1 | -1): void {
+function tailPath(ctx: CanvasRenderingContext2D, g: Shape, side: 1 | -1): void {
   const half = g.tailSpan / 2, x0 = g.tailX, c = g.tailSpan * 0.32, s = g.sweep * 0.5;
   ctx.beginPath();
   ctx.moveTo(x0 + c * 0.5, side * g.w * 0.4);
@@ -76,9 +77,19 @@ function tailPath(ctx: CanvasRenderingContext2D, g: Geo, side: 1 | -1): void {
   ctx.closePath();
 }
 
-function heliBodyPath(ctx: CanvasRenderingContext2D, g: Geo): void {
+function heliBodyPath(ctx: CanvasRenderingContext2D, g: Shape): void {
   const L = g.L, w = g.w;
   ctx.beginPath();
+  if (g.rotor === 'tandem') {
+    ctx.moveTo(L * 0.5, 0);
+    ctx.bezierCurveTo(L * 0.5, -w, L * 0.3, -w, L * 0.2, -w);
+    ctx.lineTo(-L * 0.4, -w);
+    ctx.bezierCurveTo(-L * 0.5, -w, -L * 0.5, w, -L * 0.4, w);
+    ctx.lineTo(L * 0.2, w);
+    ctx.bezierCurveTo(L * 0.3, w, L * 0.5, w, L * 0.5, 0);
+    ctx.closePath();
+    return;
+  }
   ctx.moveTo(L * 0.5, 0);
   ctx.bezierCurveTo(L * 0.5, -w, L * 0.05, -w, -L * 0.1, -w * 0.6);
   ctx.lineTo(-L * 0.75, -w * 0.13);
@@ -89,21 +100,22 @@ function heliBodyPath(ctx: CanvasRenderingContext2D, g: Geo): void {
 }
 
 /** Silhouette used for the shadow. */
-function silhouette(ctx: CanvasRenderingContext2D, g: Geo, isHeli: boolean): void {
-  if (isHeli) {
+function silhouette(ctx: CanvasRenderingContext2D, g: Shape): void {
+  if (g.rotor) {
     heliBodyPath(ctx, g); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(g.tailX, 0, g.tailSpan * 0.32, g.tailSpan * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+    if (g.rotor === 'single') { ctx.beginPath(); ctx.ellipse(g.tailX, 0, g.tailSpan * 0.32, g.tailSpan * 0.55, 0, 0, Math.PI * 2); ctx.fill(); }
     return;
   }
   wingPath(ctx, g, 1); ctx.fill();
   wingPath(ctx, g, -1); ctx.fill();
   tailPath(ctx, g, 1); ctx.fill();
   tailPath(ctx, g, -1); ctx.fill();
-  fuselagePath(ctx, g); ctx.fill();
+  if (g.canopy) fighterFuselagePath(ctx, g); else fuselagePath(ctx, g);
+  ctx.fill();
 }
 
 export function drawPlaneShadow(ctx: CanvasRenderingContext2D, pv: PlaneView, shadowAlpha: number): void {
-  const g = geo(pv.type);
+  const g = pv.type.shape;
   const s = planeScale(pv.altitude);
   const off = 8 + pv.altitude * 26;
   ctx.save();
@@ -111,15 +123,25 @@ export function drawPlaneShadow(ctx: CanvasRenderingContext2D, pv: PlaneView, sh
   ctx.rotate(pv.heading);
   ctx.scale(s, s);
   ctx.fillStyle = `rgba(10, 30, 60, ${shadowAlpha * (0.55 + 0.45 * (1 - pv.altitude))})`;
-  silhouette(ctx, g, g.rotor);
+  silhouette(ctx, g);
   ctx.restore();
 }
 
+function drawRotor(ctx: CanvasRenderingContext2D, cx: number, R: number, time: number, seed: number): void {
+  ctx.fillStyle = 'rgba(220,230,245,0.16)';
+  ctx.beginPath(); ctx.arc(cx, 0, R, 0, Math.PI * 2); ctx.fill();
+  ctx.save(); ctx.translate(cx, 0); ctx.rotate(time * 22 + seed);
+  ctx.strokeStyle = 'rgba(40,45,60,0.55)'; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+  for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(R, 0); ctx.stroke(); ctx.rotate(Math.PI / 2); }
+  ctx.restore();
+  ctx.fillStyle = '#3a4150'; ctx.beginPath(); ctx.arc(cx, 0, 3, 0, Math.PI * 2); ctx.fill();
+}
+
 export function drawPlane(ctx: CanvasRenderingContext2D, pv: PlaneView, time: number, night: boolean): void {
-  const t = pv.type, g = geo(t);
+  const t = pv.type, g = t.shape;
   const s = planeScale(pv.altitude);
   const accent = accentFor(pv);
-  const body = t.livery.body, wing = t.livery.wing;
+  const body = t.livery.body, wing = t.military ? shade(body, -0.06) : t.livery.wing;
   const outline = 'rgba(40, 55, 80, 0.55)';
   ctx.save();
   ctx.translate(pv.pos.x, pv.pos.y);
@@ -129,14 +151,15 @@ export function drawPlane(ctx: CanvasRenderingContext2D, pv: PlaneView, time: nu
   ctx.lineWidth = 1.2;
 
   if (g.rotor) {
-    // skids
+    // skids / wheels
     ctx.strokeStyle = 'rgba(60,70,90,0.8)'; ctx.lineWidth = 1.6;
     ctx.beginPath(); ctx.moveTo(g.L * 0.3, -g.w * 1.1); ctx.lineTo(-g.L * 0.2, -g.w * 1.1); ctx.moveTo(g.L * 0.3, g.w * 1.1); ctx.lineTo(-g.L * 0.2, g.w * 1.1); ctx.stroke();
-    // tail boom + fenestron
-    ctx.fillStyle = shade(body, -0.08); ctx.strokeStyle = outline; ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.ellipse(g.tailX, 0, g.tailSpan * 0.32, g.tailSpan * 0.55, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = accent;
-    ctx.beginPath(); ctx.ellipse(g.tailX, 0, g.tailSpan * 0.16, g.tailSpan * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+    if (g.rotor === 'single') {
+      ctx.fillStyle = shade(body, -0.08); ctx.strokeStyle = outline; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.ellipse(g.tailX, 0, g.tailSpan * 0.32, g.tailSpan * 0.55, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = accent;
+      ctx.beginPath(); ctx.ellipse(g.tailX, 0, g.tailSpan * 0.16, g.tailSpan * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+    }
     heliBodyPath(ctx, g);
     const grd = ctx.createLinearGradient(0, -g.w, 0, g.w);
     grd.addColorStop(0, shade(body, 0.05)); grd.addColorStop(0.5, body); grd.addColorStop(1, shade(body, -0.16));
@@ -144,23 +167,18 @@ export function drawPlane(ctx: CanvasRenderingContext2D, pv: PlaneView, time: nu
     // canopy
     ctx.fillStyle = 'rgba(70,120,190,0.85)';
     ctx.beginPath(); ctx.moveTo(g.L * 0.47, 0); ctx.bezierCurveTo(g.L * 0.47, -g.w * 0.8, g.L * 0.2, -g.w * 0.8, g.L * 0.1, -g.w * 0.5); ctx.lineTo(g.L * 0.1, g.w * 0.5); ctx.bezierCurveTo(g.L * 0.2, g.w * 0.8, g.L * 0.47, g.w * 0.8, g.L * 0.47, 0); ctx.fill();
-    // accent stripe
     ctx.strokeStyle = accent; ctx.lineWidth = g.w * 0.28;
     ctx.beginPath(); ctx.moveTo(g.L * 0.05, -g.w * 0.45); ctx.lineTo(-g.L * 0.7, -g.w * 0.05); ctx.stroke();
-    // rotor
-    const R = t.hull * 1.65;
-    ctx.fillStyle = 'rgba(220,230,245,0.16)';
-    ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fill();
-    ctx.save(); ctx.rotate(time * 22 + pv.id);
-    ctx.strokeStyle = 'rgba(40,45,60,0.55)'; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
-    for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(R, 0); ctx.stroke(); ctx.rotate(Math.PI / 2); }
-    ctx.restore();
-    ctx.fillStyle = '#3a4150'; ctx.beginPath(); ctx.arc(0, 0, g.w * 0.35, 0, Math.PI * 2); ctx.fill();
+    if (g.rotor === 'tandem') {
+      drawRotor(ctx, g.L * 0.28, t.hull * 1.25, time, pv.id);
+      drawRotor(ctx, -g.L * 0.3, t.hull * 1.25, time * 1.02, pv.id + 2);
+    } else {
+      drawRotor(ctx, 0, t.hull * 1.65, time, pv.id);
+    }
     ctx.restore();
     return;
   }
 
-  // floats under the fuselage (seaplane)
   if (g.floats) {
     ctx.fillStyle = shade(accent, -0.1); ctx.strokeStyle = outline;
     for (const side of [-1, 1]) {
@@ -176,11 +194,12 @@ export function drawPlane(ctx: CanvasRenderingContext2D, pv: PlaneView, time: nu
       const grd = ctx.createLinearGradient(0, 0, 0, side * g.span / 2);
       grd.addColorStop(0, shade(wing, -0.06)); grd.addColorStop(1, shade(wing, 0.04));
       ctx.fillStyle = grd; ctx.fill(); ctx.strokeStyle = outline; ctx.lineWidth = 1.1; ctx.stroke();
-      // accent wingtip
-      ctx.save(); ctx.clip();
-      ctx.fillStyle = accent;
-      ctx.fillRect(-g.L, side * (g.span / 2 - g.chord * 0.32), g.L * 2, g.chord * 0.4 * side);
-      ctx.restore();
+      if (!t.military) {
+        ctx.save(); ctx.clip();
+        ctx.fillStyle = accent;
+        ctx.fillRect(-g.L, side * (g.span / 2 - g.chord * 0.32), g.L * 2, g.chord * 0.4 * side);
+        ctx.restore();
+      }
       if (g.winglets) {
         ctx.strokeStyle = accent; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
         const tipX = g.wingX + g.chord * 0.6 - g.sweep;
@@ -190,12 +209,12 @@ export function drawPlane(ctx: CanvasRenderingContext2D, pv: PlaneView, time: nu
   };
   const drawEngines = (): void => {
     for (const e of g.engines) {
-      if (e.kind === 'jet') {
+      if (e.kind === 'jet' || e.kind === 'rearjet') {
         ctx.fillStyle = shade(body, -0.12); ctx.strokeStyle = outline; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.roundRect(e.x - g.w * 0.9, e.y - g.w * 0.42, g.w * 1.8, g.w * 0.84, g.w * 0.42); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = '#2f3542'; ctx.beginPath(); ctx.ellipse(e.x + g.w * 0.85, e.y, g.w * 0.12, g.w * 0.34, 0, 0, Math.PI * 2); ctx.fill();
+        const len = e.kind === 'rearjet' ? g.w * 2.2 : g.w * 1.8;
+        ctx.beginPath(); ctx.roundRect(e.x - len / 2, e.y - g.w * 0.42, len, g.w * 0.84, g.w * 0.42); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#2f3542'; ctx.beginPath(); ctx.ellipse(e.x + len / 2 - g.w * 0.05, e.y, g.w * 0.12, g.w * 0.34, 0, 0, Math.PI * 2); ctx.fill();
       } else if (e.x < g.L * 0.45) {
-        // nacelle on wing
         ctx.fillStyle = shade(body, -0.08); ctx.strokeStyle = outline; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.roundRect(e.x - g.w * 0.8, e.y - g.w * 0.36, g.w * 1.7, g.w * 0.72, g.w * 0.36); ctx.fill(); ctx.stroke();
       }
@@ -204,12 +223,16 @@ export function drawPlane(ctx: CanvasRenderingContext2D, pv: PlaneView, time: nu
 
   if (!g.highWing) { drawWings(); drawEngines(); }
 
-  // tailplane
+  // tailplane (+ twin fins for fighters)
   for (const side of [1, -1] as const) {
-    tailPath(ctx, g, side); ctx.fillStyle = accent; ctx.fill(); ctx.strokeStyle = outline; ctx.lineWidth = 1; ctx.stroke();
+    tailPath(ctx, g, side); ctx.fillStyle = t.military ? shade(body, -0.1) : accent; ctx.fill(); ctx.strokeStyle = outline; ctx.lineWidth = 1; ctx.stroke();
+  }
+  if (g.twinTail) {
+    ctx.strokeStyle = shade(body, -0.35); ctx.lineWidth = Math.max(1.5, g.w * 0.3); ctx.lineCap = 'round';
+    for (const side of [1, -1]) { ctx.beginPath(); ctx.moveTo(g.tailX + g.tailSpan * 0.1, side * g.w * 0.75); ctx.lineTo(g.tailX - g.tailSpan * 0.35, side * g.w * 0.9); ctx.stroke(); }
   }
   // fuselage
-  fuselagePath(ctx, g);
+  if (g.canopy) fighterFuselagePath(ctx, g); else fuselagePath(ctx, g);
   const fg = ctx.createLinearGradient(0, -g.w, 0, g.w);
   fg.addColorStop(0, shade(body, 0.04)); fg.addColorStop(0.45, body); fg.addColorStop(1, shade(body, -0.2));
   ctx.fillStyle = fg; ctx.fill(); ctx.strokeStyle = outline; ctx.lineWidth = 1.2; ctx.stroke();
@@ -218,19 +241,34 @@ export function drawPlane(ctx: CanvasRenderingContext2D, pv: PlaneView, time: nu
     ctx.beginPath(); ctx.roundRect(-g.L * 0.05, -g.w * 0.62, g.L * 0.45, g.w * 1.24, g.w * 0.6); ctx.fill();
     ctx.strokeStyle = 'rgba(40,55,80,0.25)'; ctx.stroke();
   }
-  // cheatline
-  ctx.save(); fuselagePath(ctx, g); ctx.clip();
-  ctx.fillStyle = hexA(accent, 0.9);
-  ctx.fillRect(-g.L * 0.5, g.w * 0.45, g.L * 0.85, g.w * 0.22);
-  ctx.restore();
+  // cheatline (civil) or roundel (military)
+  if (!t.military) {
+    ctx.save(); if (g.canopy) fighterFuselagePath(ctx, g); else fuselagePath(ctx, g); ctx.clip();
+    ctx.fillStyle = hexA(accent, 0.9);
+    ctx.fillRect(-g.L * 0.5, g.w * 0.45, g.L * 0.85, g.w * 0.22);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = '#e0413e'; ctx.beginPath(); ctx.arc(-g.L * 0.1, g.w * 0.45, g.w * 0.28, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(-g.L * 0.1, g.w * 0.45, g.w * 0.17, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1f4e8c'; ctx.beginPath(); ctx.arc(-g.L * 0.1, g.w * 0.45, g.w * 0.08, 0, Math.PI * 2); ctx.fill();
+  }
   // fin (seen from above as a short spine)
-  ctx.strokeStyle = shade(accent, -0.15); ctx.lineWidth = Math.max(1.4, g.w * 0.3); ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(g.tailX - g.tailSpan * 0.1, 0); ctx.lineTo(-g.L * 0.5 + 1, 0); ctx.stroke();
-  // cockpit
-  ctx.fillStyle = 'rgba(60,105,175,0.95)';
-  ctx.beginPath(); ctx.moveTo(g.L * 0.44, 0); ctx.lineTo(g.L * 0.3, -g.w * 0.75); ctx.lineTo(g.L * 0.24, -g.w * 0.72); ctx.lineTo(g.L * 0.28, 0); ctx.lineTo(g.L * 0.24, g.w * 0.72); ctx.lineTo(g.L * 0.3, g.w * 0.75); ctx.closePath(); ctx.fill();
+  if (!g.twinTail) {
+    ctx.strokeStyle = t.military ? shade(body, -0.35) : shade(accent, -0.15); ctx.lineWidth = Math.max(1.4, g.w * 0.3); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(g.tailX - g.tailSpan * 0.1, 0); ctx.lineTo(-g.L * 0.5 + 1, 0); ctx.stroke();
+  }
+  // cockpit / canopy
+  if (g.canopy) {
+    ctx.fillStyle = 'rgba(40,70,120,0.9)';
+    ctx.beginPath(); ctx.ellipse(g.L * 0.18, 0, g.L * 0.16, g.w * 0.62, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(180,220,255,0.5)';
+    ctx.beginPath(); ctx.ellipse(g.L * 0.2, -g.w * 0.15, g.L * 0.08, g.w * 0.22, 0, 0, Math.PI * 2); ctx.fill();
+  } else {
+    ctx.fillStyle = 'rgba(60,105,175,0.95)';
+    ctx.beginPath(); ctx.moveTo(g.L * 0.44, 0); ctx.lineTo(g.L * 0.3, -g.w * 0.75); ctx.lineTo(g.L * 0.24, -g.w * 0.72); ctx.lineTo(g.L * 0.28, 0); ctx.lineTo(g.L * 0.24, g.w * 0.72); ctx.lineTo(g.L * 0.3, g.w * 0.75); ctx.closePath(); ctx.fill();
+  }
   // windows
-  if (g.L > 60) {
+  if (g.L > 60 && !g.canopy && !t.military) {
     ctx.fillStyle = 'rgba(60,90,140,0.7)';
     const n = Math.floor(g.L / 9);
     for (let i = 0; i < n; i++) {
@@ -254,6 +292,17 @@ export function drawPlane(ctx: CanvasRenderingContext2D, pv: PlaneView, time: nu
     ctx.restore();
     ctx.fillStyle = '#3a4150'; ctx.beginPath(); ctx.arc(px, e.y, 1.6, 0, Math.PI * 2); ctx.fill();
   }
+  // afterburner glow
+  if (g.afterburner && pv.state === 'flying') {
+    const n = g.afterburners ?? 1;
+    for (let i = 0; i < n; i++) {
+      const y = n === 1 ? 0 : (i === 0 ? -1 : 1) * g.w * 0.45;
+      const flick = 0.7 + 0.3 * Math.sin(time * 40 + i);
+      const gr = ctx.createRadialGradient(-g.L * 0.5, y, 0, -g.L * 0.5, y, g.w * 0.9 * flick);
+      gr.addColorStop(0, 'rgba(255,240,200,0.95)'); gr.addColorStop(0.4, 'rgba(255,140,40,0.7)'); gr.addColorStop(1, 'rgba(255,80,20,0)');
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.ellipse(-g.L * 0.5 - g.w * 0.4, y, g.w * 1.4 * flick, g.w * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+    }
+  }
 
   // navigation lights
   const strobe = (time * 1.4 + pv.id * 0.37) % 1 < 0.08;
@@ -269,7 +318,7 @@ export function drawPlane(ctx: CanvasRenderingContext2D, pv: PlaneView, time: nu
 
 /** Glow pass for night: call with globalCompositeOperation = 'lighter'. */
 export function drawPlaneLights(ctx: CanvasRenderingContext2D, pv: PlaneView, time: number): void {
-  const g = geo(pv.type);
+  const g = pv.type.shape;
   const s = planeScale(pv.altitude);
   ctx.save();
   ctx.translate(pv.pos.x, pv.pos.y); ctx.rotate(pv.heading); ctx.scale(s, s);
@@ -283,6 +332,7 @@ export function drawPlaneLights(ctx: CanvasRenderingContext2D, pv: PlaneView, ti
     glow(tipX, -g.span / 2, 9, 'rgba(255,80,80,0.55)');
     glow(tipX, g.span / 2, 9, 'rgba(80,255,140,0.55)');
     glow(g.L * 0.5, 0, 14, 'rgba(255,245,220,0.35)');
+    if (g.afterburner) glow(-g.L * 0.5, 0, 22, 'rgba(255,150,60,0.6)');
   } else {
     glow(0, 0, 10, 'rgba(255,90,90,0.5)');
   }

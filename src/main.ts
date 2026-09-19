@@ -42,19 +42,26 @@ function makeDemoWorld(): World {
 
 function onWorldEvent(e: GameEvent): void {
   const p = world.planeById(e.planes[0]);
-  const typeId = p?.type.id ?? 'c172';
-  const cs = radio.callsign(typeId, e.planes[0]);
+  const type = p?.type;
+  if (!type) return;
+  const cs = radio.callsign(type, e.planes[0]);
   switch (e.kind) {
-    case 'spawn': radio.say(`Wolkenhaven Tower, ${cs}, inbound for landing.`); break;
+    case 'spawn':
+      if (!p?.urgent) radio.say(`Wolkenhaven Tower, ${cs}, inbound for landing.`, { who: 'pilot' });
+      break;
+    case 'mayday':
+      radio.say(`Mayday, mayday, Wolkenhaven Tower, ${cs}, ${type.family === 'fighter' ? 'bingo fuel' : 'minimum fuel'}, request priority landing.`, { who: 'pilot', urgent: true });
+      break;
     case 'lock': {
       const rw = world.runwayById(String(e.meta?.runway ?? ''));
-      if (rw) radio.say(rw.kind === 'helipad' ? `${cs}, cleared to land helipad, wind ${Math.round(world.wind.kmh)} kilometers.` : `${cs}, cleared to land runway ${runwayCallout(rw.heading)}.`);
+      if (rw) radio.say(rw.kind === 'helipad' ? `${cs}, cleared to land helipad, wind ${Math.round(world.wind.kmh)} kilometers.` : `${cs}, cleared to land runway ${runwayCallout(rw.heading)}, wind ${Math.round(world.wind.kmh)} kilometers.`);
       break;
     }
-    case 'touchdown': sfx.touchdown(Number(e.meta?.heavy) === 1); break;
-    case 'landed': radio.say(`${cs}, welcome to Wolkenhaven, taxi to the apron.`); break;
-    case 'goaround': radio.say(`${cs}, go around, I say again, go around.`, true); break;
-    case 'nearmiss': radio.say(`Traffic alert, ${cs}, traffic, turn immediately.`, true); break;
+    case 'touchdown': sfx.touchdown(type.cls === 'heavy' || type.cls === 'medium' || type.cls === 'fast'); break;
+    case 'landed': radio.say(p?.urgent ? `${cs}, welcome home, emergency services are standing by.` : `${cs}, welcome to Wolkenhaven, taxi to the apron.`); break;
+    case 'goaround': radio.say(`${cs}, go around, I say again, go around.`, { urgent: true }); break;
+    case 'nearmiss': radio.say(`Traffic alert, ${cs}, traffic, turn immediately.`, { urgent: true }); break;
+    case 'ditch': radio.say(`${cs} is going down, ditching, ditching.`, { who: 'pilot', urgent: true }); break;
     case 'crash': radio.stop(); break;
   }
 }
