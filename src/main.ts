@@ -13,7 +13,7 @@ import { UI, type UIActions } from './ui/screens';
 import { addCoins, levelProgress, persist, recordLevelResult, save } from './util/storage';
 import { Ambience, EngineMixer, Radio, runwayCallout, sfx, unlockAudio } from './util/audio';
 
-type Mode = 'title' | 'worlds' | 'missions' | 'shop' | 'tutorial' | 'playing' | 'paused' | 'complete' | 'failed' | 'settings' | 'ad';
+type Mode = 'title' | 'worlds' | 'missions' | 'shop' | 'fleet' | 'tutorial' | 'playing' | 'paused' | 'complete' | 'failed' | 'settings' | 'ad';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
@@ -116,6 +116,8 @@ const actions: UIActions = {
     if (mode === 'title') ui.title(); else if (mode === 'worlds') ui.worlds(); else if (mode === 'missions') ui.missions(current.worldIndex); else if (mode === 'paused') ui.pause(world.level.name); else { mode = 'title'; ui.title(); }
   },
   openShop() { prevMode = mode; mode = 'shop'; ui.shop(() => actions.closeShop()); },
+  openFleet() { prevMode = mode; mode = 'fleet'; ui.fleet(() => actions.closeFleet()); },
+  closeFleet() { mode = prevMode === 'fleet' || prevMode === 'shop' || prevMode === 'settings' ? 'title' : prevMode; if (mode === 'worlds') ui.worlds(); else if (mode === 'missions') ui.missions(current.worldIndex); else { mode = 'title'; ui.title(); } },
   closeShop() {
     mode = prevMode === 'shop' || prevMode === 'settings' ? 'title' : prevMode;
     if (mode === 'worlds') ui.worlds(); else if (mode === 'missions') ui.missions(current.worldIndex); else { mode = 'title'; ui.title(); }
@@ -203,7 +205,7 @@ function frame(now: number): void {
     world.update(dt);
   }
   // audio follow-up
-  const audible = mode === 'playing' || (world.demo && mode !== 'shop' && mode !== 'settings');
+  const audible = mode === 'playing' || (world.demo && mode !== 'shop' && mode !== 'settings' && mode !== 'fleet');
   engines.setMuted(!audible);
   engines.update(world.planes.filter(p => p.state === 'flying' || p.state === 'landing').map(p => ({ id: p.id, kind: p.type.engines, x: p.pos.x, y: p.pos.y, speed: p.speed, maxSpeed: p.type.speed, altitude: p.altitude, state: p.state })), world.timeScale);
   ambience.update(dt, mode === 'playing' || world.demo ? world.wind.kmh : 0, world.timeScale);

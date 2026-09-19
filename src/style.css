@@ -209,3 +209,14 @@ html, body {
 .btn[disabled] { opacity: .55; pointer-events: none; }
 .coinsline { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 18px; font-weight: 800; margin: 6px 0 2px; color: #8a5a00; }
 .coinsline b { font-size: 24px; color: var(--ink); }
+
+/* fleet gallery */
+.fleetgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 520px) { .fleetgrid { grid-template-columns: repeat(3, 1fr); } }
+.fleetcard { background: var(--paper); border-radius: 18px; padding: 8px 10px 10px; box-shadow: 0 10px 22px rgba(10,40,80,.18); }
+.fleetcard canvas { width: 100%; height: auto; display: block; background: linear-gradient(180deg, #bfe7ff, #7fc4f0); border-radius: 12px; }
+.fleetcard.locked canvas { filter: grayscale(1) brightness(.8); }
+.fleetcard .fname { font-weight: 900; font-size: 13px; margin-top: 8px; line-height: 1.15; }
+.fleetcard .fmeta { font-size: 11px; color: var(--ink-soft); font-weight: 700; margin-top: 2px; }
+.fleetcard .fstats { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.fleetcard .fstats span { font-size: 10.5px; font-weight: 800; padding: 2px 7px; border-radius: 999px; background: #eef3fa; color: var(--ink-soft); }

@@ -36,14 +36,14 @@ const FLEET: Array<Array<{ type: string; from: number; weight: number }>> = [
     { type: 'c172', from: 0, weight: 1 }, { type: 'dhc6', from: 0, weight: 1 }, { type: 'kingair', from: 0, weight: 2 },
     { type: 'atr72', from: 0, weight: 3 }, { type: 'q400', from: 1, weight: 2 }, { type: 'pc12', from: 1, weight: 1 },
     { type: 'e175', from: 2, weight: 2 }, { type: 'crj900', from: 3, weight: 2 }, { type: 'citation', from: 3, weight: 1 },
-    { type: 'a320', from: 5, weight: 2 }, { type: 'b737', from: 6, weight: 2 },
+    { type: 'a320', from: 5, weight: 2 }, { type: 'b737', from: 6, weight: 2 }, { type: 'b787', from: 7, weight: 2 },
   ],
   // 2 Molenrif: crosswind, narrowbodies
   [
     { type: 'dhc6', from: 0, weight: 1 }, { type: 'atr72', from: 0, weight: 2 }, { type: 'e195', from: 0, weight: 2 },
     { type: 'a320', from: 0, weight: 3 }, { type: 'b737', from: 1, weight: 3 }, { type: 'q400', from: 1, weight: 1 },
     { type: 'a321', from: 3, weight: 2 }, { type: 'g650', from: 3, weight: 1 }, { type: 'b757', from: 4, weight: 2 },
-    { type: 'b787', from: 6, weight: 2 },
+    { type: 'b787', from: 5, weight: 2 }, { type: 'b747', from: 7, weight: 2 }, { type: 'a350', from: 7, weight: 1 },
   ],
   // 3 Tweelingzusters: short + long, the widebodies arrive, first military transport
   [
@@ -116,6 +116,11 @@ export function buildMission(worldIndex: number, index: number): LevelDef & { ta
 
 /** All aircraft that can appear on a world (for the island card). */
 export function fleetOf(worldIndex: number): string[] { return FLEET[worldIndex].map(f => f.type); }
+/** First world (and mission) in which a type appears, for the fleet gallery. */
+export function firstAppearance(typeId: string): { worldIndex: number; index: number } | null {
+  for (let w = 0; w < FLEET.length; w++) { const f = FLEET[w].find(x => x.type === typeId); if (f) return { worldIndex: w, index: f.from }; }
+  return null;
+}
 
 export function worldStars(worldIndex: number): number {
   let s = 0;

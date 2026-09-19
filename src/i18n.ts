@@ -80,6 +80,10 @@ const nl: Dict = {
   total: 'Totaal',
   mapTitle: 'Wolkenhaven',
   weatherNav: 'Weernavigatie',
+  fleet: 'Vloot',
+  appearsOn: 'Vliegt vanaf',
+  crosswind: 'Zijwind',
+  seen: 'Gezien',
   forecast: 'Verwachting',
   now: 'nu',
 };
@@ -162,6 +166,10 @@ const en: Dict = {
   total: 'Total',
   mapTitle: 'Wolkenhaven',
   weatherNav: 'Weather navigation',
+  fleet: 'Fleet',
+  appearsOn: 'Flies from',
+  crosswind: 'Crosswind',
+  seen: 'Seen',
   forecast: 'Forecast',
   now: 'now',
 };

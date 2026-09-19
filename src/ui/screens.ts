@@ -1,6 +1,7 @@
-import { PLANE_TYPES } from '../game/planes';
+import { PLANE_TYPES, displayKmh } from '../game/planes';
+import { drawPlane } from '../render/planes';
 import type { Report } from '../game/postmortem';
-import { LEVELS_PER_WORLD, WORLDS, buildMission, missionId, missionUnlocked, totalStars, worldStars, worldUnlocked } from '../game/progress';
+import { LEVELS_PER_WORLD, WORLDS, buildMission, firstAppearance, missionId, missionUnlocked, totalStars, worldStars, worldUnlocked } from '../game/progress';
 import { UPGRADES, buyUpgrade, nextCost, upgradeDesc, upgradeName } from '../game/upgrades';
 import { lang, t } from '../i18n';
 import { levelProgress, persist, save, upgradeLevel } from '../util/storage';
@@ -19,6 +20,8 @@ export interface UIActions {
   closeSettings(): void;
   openShop(): void;
   closeShop(): void;
+  openFleet(): void;
+  closeFleet(): void;
   tutorialDone(): void;
   makeThumb(worldIndex: number, canvas: HTMLCanvasElement): void;
   doubleCoins(): void;
@@ -101,13 +104,64 @@ export class UI {
         <div class="statrow"><span>${svgStar(true, 18)}<b>${stars}</b> / ${WORLDS.length * LEVELS_PER_WORLD * 3}</span>${coinBadge()}</div>
         <div class="stack" style="margin-top:12px">
           <button class="btn" data-a="play">${t('play')}</button>
-          <div class="row" style="margin-top:0"><button class="btn secondary" data-a="shop">${t('airport')}</button><button class="btn secondary" data-a="settings">${t('settings')}</button></div>
+          <div class="row" style="margin-top:0"><button class="btn secondary" data-a="shop">${t('airport')}</button><button class="btn secondary" data-a="fleet">${t('fleet')}</button><button class="btn secondary" data-a="settings">${t('settings')}</button></div>
         </div>
       </div>`;
     s.querySelector('[data-a=play]')!.addEventListener('click', () => this.actions.toWorlds());
     s.querySelector('[data-a=shop]')!.addEventListener('click', () => this.actions.openShop());
+    s.querySelector('[data-a=fleet]')!.addEventListener('click', () => this.actions.openFleet());
     s.querySelector('[data-a=settings]')!.addEventListener('click', () => this.actions.openSettings());
     this.mount(s);
+  }
+
+  /** Gallery of every real aircraft in the game, drawn live, with the island it first appears on. */
+  fleet(back: () => void): void {
+    const s = this.screen('dim top');
+    s.appendChild(this.topbar(t('fleet'), back));
+    const families: Array<[string, string, string]> = [
+      ['ga', 'Kleine luchtvaart', 'General aviation'], ['turboprop', 'Turboprops', 'Turboprops'], ['regional', 'Regionale jets', 'Regional jets'],
+      ['bizjet', 'Zakenjets', 'Business jets'], ['narrow', 'Narrowbody', 'Narrowbody'], ['wide', 'Widebody', 'Widebody'],
+      ['sea', 'Watervliegtuigen', 'Seaplanes'], ['heli', 'Helikopters', 'Helicopters'], ['fighter', 'Straaljagers', 'Fighters'], ['miltransport', 'Militair transport', 'Military transport'],
+    ];
+    const wrap = document.createElement('div'); wrap.style.cssText = 'width:min(560px,100%);display:flex;flex-direction:column;gap:14px;';
+    const canvases: Array<{ c: HTMLCanvasElement; id: string }> = [];
+    for (const [fam, nlName, enName] of families) {
+      const types = Object.values(PLANE_TYPES).filter(p => p.family === fam);
+      if (!types.length) continue;
+      const sec = document.createElement('div');
+      sec.innerHTML = `<div class="sub" style="color:#fff;text-shadow:0 2px 8px rgba(0,30,80,.5);margin:0 0 8px 4px">${lang() === 'nl' ? nlName : enName}</div>`;
+      const grid = document.createElement('div'); grid.className = 'fleetgrid';
+      for (const p of types) {
+        const fa = firstAppearance(p.id);
+        const unlocked = fa ? worldUnlocked(fa.worldIndex) : true;
+        const card = document.createElement('div'); card.className = `fleetcard${unlocked ? '' : ' locked'}`;
+        const c = document.createElement('canvas'); c.width = 240; c.height = 150; canvases.push({ c, id: p.id });
+        const where = fa ? `${WORLDS[fa.worldIndex].name} · ${t('mission').toLowerCase()} ${fa.index + 1}` : '-';
+        card.appendChild(c);
+        card.insertAdjacentHTML('beforeend', `<div class="fname">${p.name}</div><div class="fmeta">${p.maker}${p.military ? ' · ' + (lang() === 'nl' ? 'militair' : 'military') : ''}</div>
+          <div class="fstats"><span>${displayKmh(p.speed)} km/u</span><span>${t('crosswind')} ${p.crosswindLimit}</span><span>${p.ils ? 'ILS' : (lang() === 'nl' ? 'visueel' : 'visual')}</span></div>
+          <div class="fmeta">${t('appearsOn')}: ${where}</div>`);
+        grid.appendChild(card);
+      }
+      sec.appendChild(grid); wrap.appendChild(sec);
+    }
+    s.appendChild(wrap);
+    this.mount(s);
+    let tick = 0;
+    const draw = (): void => {
+      tick += 0.016;
+      for (const { c, id } of canvases) {
+        const type = PLANE_TYPES[id];
+        const ctx = c.getContext('2d')!;
+        ctx.clearRect(0, 0, c.width, c.height);
+        const scale = Math.min(200 / (type.shape.L * 1.05), 120 / Math.max(type.shape.span, type.hull * 3.4));
+        ctx.save(); ctx.translate(c.width / 2, c.height / 2 + 4); ctx.scale(scale, scale);
+        drawPlane(ctx, { type, pos: { x: 0, y: 0 }, heading: -Math.PI / 2, altitude: 1, bank: 0, livery: 0, state: 'flying', id: 1 }, tick, false);
+        ctx.restore();
+      }
+      if (this.current === s) requestAnimationFrame(draw);
+    };
+    draw();
   }
 
   worlds(): void {
@@ -285,8 +339,6 @@ export class UI {
           <button data-l="auto" class="${save.lang === 'auto' ? 'on' : ''}">Auto</button>
           <button data-l="nl" class="${save.lang === 'nl' ? 'on' : ''}">NL</button>
           <button data-l="en" class="${save.lang === 'en' ? 'on' : ''}">EN</button></div></div>
-        <div class="sub" style="margin-top:14px">${t('planesOf')}</div>
-        <div class="planelist">${Object.values(PLANE_TYPES).map(p => `<span>${p.name}</span>`).join('')}</div>
         <div class="stack"><button class="btn secondary" data-a="back">${t('back')}</button></div>`;
       card.querySelectorAll('[data-k]').forEach(b => b.addEventListener('click', () => {
         const k = (b as HTMLElement).dataset.k as 'sound' | 'music' | 'radio' | 'haptics';
