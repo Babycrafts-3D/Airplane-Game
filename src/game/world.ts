@@ -146,7 +146,7 @@ export class World {
     const last = raw[raw.length - 1];
     for (const rw of this.runways) {
       if (dist(last, rw.gate) > GATE_R) continue;
-      if (!runwayAccepts(rw.kind, plane.type.cls)) {
+      if (!runwayAccepts(rw.kind, plane.type)) {
         this.toast(`${plane.type.name} ${t('wrongRunwayHint')}`, 'warn', 1.6);
         return null;
       }
@@ -486,7 +486,7 @@ export class World {
   }
 
   private tryLand(p: Plane, rw: Runway): void {
-    const kindOk = runwayAccepts(rw.kind, p.type.cls);
+    const kindOk = runwayAccepts(rw.kind, p.type);
     const busy = rw.occupiedBy !== null && rw.occupiedBy !== p.id;
     let reason: string | null = null;
     const wx = this.weather;

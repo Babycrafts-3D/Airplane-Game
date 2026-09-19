@@ -145,9 +145,11 @@ export const PLANE_TYPES: Record<string, PlaneType> = Object.fromEntries(SPECS.m
 
 export const displayKmh = (speed: number): number => Math.round(speed * 2.4 / 5) * 5;
 
-export function runwayAccepts(kind: string, cls: string): boolean {
+export function runwayAccepts(kind: string, type: { cls: string; family?: string }): boolean {
+  const cls = type.cls, fam = type.family ?? '';
   switch (kind) {
-    case 'short': return cls === 'light' || cls === 'medium';
+    // a short strip takes light aircraft and the smaller medium types (turboprops, business jets), not airliners
+    case 'short': return cls === 'light' || (cls === 'medium' && (fam === 'turboprop' || fam === 'bizjet' || fam === 'ga'));
     case 'long': return cls === 'light' || cls === 'medium' || cls === 'heavy' || cls === 'fast';
     case 'water': return cls === 'sea';
     case 'helipad': return cls === 'heli';
