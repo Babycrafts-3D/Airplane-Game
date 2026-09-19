@@ -137,7 +137,7 @@ export function drawHud(ctx: Ctx, world: World, L: HudLayout, time: number, pal:
   if (sel && sel.state === 'flying' && !world.demo) {
     const adv = advise(world, sel);
     const rowsN = adv.rows.length;
-    const w = Math.min(L.sw - 24 * u, 360 * u), h = (96 + rowsN * 17 + 44 + 30) * u;
+    const w = Math.min(L.sw - 24 * u, 360 * u), h = (96 + rowsN * 17 + 58 + 30) * u;
     const x = L.safeLeft + 12 * u, y = L.sh - L.safeBottom - h - 16 * u;
     roundedCard(ctx, x, y, w, h, 20 * u, pal.hud);
     ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, w, h, 20 * u); ctx.clip();
@@ -169,10 +169,10 @@ export function drawHud(ctx: Ctx, world: World, L: HudLayout, time: number, pal:
     // advice
     ry += 4 * u;
     const advColor = adv.adviceLevel >= 3 ? 'rgba(200,30,60,0.9)' : adv.adviceLevel >= 1 ? 'rgba(200,130,20,0.9)' : 'rgba(30,150,100,0.9)';
-    ctx.fillStyle = advColor; ctx.beginPath(); ctx.roundRect(x + 12 * u, ry - 6 * u, w - 24 * u, 34 * u, 10 * u); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.font = font('800', 11);
-    wrapText(ctx, adv.advice, x + 20 * u, ry + 8 * u, w - 40 * u, 13 * u, 2);
-    ry += 40 * u;
+    ctx.fillStyle = advColor; ctx.beginPath(); ctx.roundRect(x + 12 * u, ry - 6 * u, w - 24 * u, 48 * u, 10 * u); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = font('800', 10.5);
+    wrapText(ctx, adv.advice, x + 20 * u, ry + 7 * u, w - 40 * u, 12.5 * u, 3);
+    ry += 54 * u;
     // forecast strip
     ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = font('800', 9.5);
     ctx.fillText((t('forecast') || 'VERWACHTING').toUpperCase(), x + 16 * u, ry + 2 * u);
