@@ -8,12 +8,22 @@ import { drawHeart, drawPlane, drawPlaneGlyph } from './planes';
 type Ctx = CanvasRenderingContext2D;
 
 export interface HudLayout { sw: number; sh: number; safeTop: number; safeBottom: number; safeLeft: number; safeRight: number; ui: number }
-export interface HudHits { pause: { x: number; y: number; w: number; h: number } }
+export interface Rect { x: number; y: number; w: number; h: number }
+export interface HudHits { pause: Rect; slowmo?: Rect }
 
 function roundedCard(ctx: Ctx, x: number, y: number, w: number, h: number, r: number, fill: string): void {
   ctx.fillStyle = fill;
   ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1; ctx.stroke();
+}
+
+export function drawCoin(ctx: Ctx, x: number, y: number, r: number): void {
+  const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
+  g.addColorStop(0, '#fff1a8'); g.addColorStop(0.6, '#ffcf5a'); g.addColorStop(1, '#d99a12');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(120,70,0,0.5)'; ctx.lineWidth = r * 0.12; ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = r * 0.14;
+  ctx.beginPath(); ctx.arc(x, y, r * 0.62, 0, Math.PI * 2); ctx.stroke();
 }
 
 export function drawHud(ctx: Ctx, world: World, L: HudLayout, time: number, pal: Palette): HudHits {
@@ -36,12 +46,16 @@ export function drawHud(ctx: Ctx, world: World, L: HudLayout, time: number, pal:
   ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = font('800', 13);
   ctx.fillText(world.endless ? t('endless').toLowerCase() : `/ ${world.level.goal}`, left + 54 * u + nw, top + 44 * u);
   // hearts
-  for (let i = 0; i < 3; i++) drawHeart(ctx, left + 26 * u + i * 17 * u, top + 58 * u, 15 * u, i < world.hearts, '#ff6a8a');
-  // best
+  for (let i = 0; i < world.maxHearts; i++) drawHeart(ctx, left + 26 * u + i * 15 * u, top + 58 * u, 14 * u, i < world.hearts, '#ff6a8a');
+  // best + coins earned
   const best = levelProgress(world.level.id).best;
   ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = font('900', 11);
   ctx.shadowColor = 'rgba(0,20,50,0.6)'; ctx.shadowBlur = 6 * u;
   ctx.fillText(`${t('best').toUpperCase()}: ${Math.max(best, world.landed)}`, left + 6 * u, top + ch + 16 * u);
+  if (world.coinsEarned > 0) {
+    drawCoin(ctx, left + 90 * u, top + ch + 12 * u, 6 * u);
+    ctx.fillText(`+${world.coinsEarned}`, left + 100 * u, top + ch + 16 * u);
+  }
   ctx.shadowBlur = 0;
 
   // --- pause button ---
@@ -73,6 +87,27 @@ export function drawHud(ctx: Ctx, world: World, L: HudLayout, time: number, pal:
     ctx.fillText(t('kmh'), cx + 22 * u + ctx.measureText('00').width * 1.6, wy + 5 * u);
   }
 
+  // --- slow-motion button (upgrade) ---
+  if (world.slowmoMax > 0) {
+    const r = 28 * u;
+    const bx = right - r, by = L.sh - L.safeBottom - 16 * u - r;
+    const active = world.timeScale < 1;
+    const avail = world.slowmoCharges > 0 && !active;
+    ctx.fillStyle = active ? 'rgba(80,140,255,0.9)' : avail ? pal.hud : 'rgba(40,50,70,0.45)';
+    ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 1.5; ctx.stroke();
+    // hourglass-like tower icon: a clock with slow hand
+    ctx.strokeStyle = avail || active ? '#fff' : 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2.2 * u; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(bx, by - 2 * u, 11 * u, 0, Math.PI * 2); ctx.stroke();
+    const a = active ? time * 1.5 : -Math.PI / 2;
+    ctx.beginPath(); ctx.moveTo(bx, by - 2 * u); ctx.lineTo(bx + Math.cos(a) * 7 * u, by - 2 * u + Math.sin(a) * 7 * u); ctx.stroke();
+    for (let i = 0; i < world.slowmoMax; i++) {
+      ctx.fillStyle = i < world.slowmoCharges ? '#7cf7a0' : 'rgba(255,255,255,0.3)';
+      ctx.beginPath(); ctx.arc(bx - 6 * u + i * 12 * u, by + 15 * u, 3 * u, 0, Math.PI * 2); ctx.fill();
+    }
+    hits.slowmo = { x: bx - r - 6, y: by - r - 6, w: r * 2 + 12, h: r * 2 + 12 };
+  }
+
   // --- toasts ---
   let ty = top + 96 * u;
   ctx.textAlign = 'center';
@@ -93,8 +128,8 @@ export function drawHud(ctx: Ctx, world: World, L: HudLayout, time: number, pal:
   const sel = world.selected !== null ? world.planeById(world.selected) : undefined;
   if (sel && world.selectedUntil > world.time && sel.state === 'flying') {
     const a = Math.min(1, (world.selectedUntil - world.time) / 0.3);
-    const w = Math.min(L.sw - 24 * u, 340 * u), h = 84 * u;
-    const x = L.sw / 2 - w / 2, y = L.sh - L.safeBottom - h - 16 * u;
+    const w = Math.min(L.sw - 24 * u - (world.slowmoMax > 0 ? 70 * u : 0), 340 * u), h = 84 * u;
+    const x = (world.slowmoMax > 0 ? L.safeLeft + 12 * u : L.sw / 2 - w / 2), y = L.sh - L.safeBottom - h - 16 * u;
     ctx.globalAlpha = a;
     roundedCard(ctx, x, y, w, h, 20 * u, pal.hud);
     ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, w, h, 20 * u); ctx.clip();

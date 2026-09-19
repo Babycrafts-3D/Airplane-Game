@@ -6,6 +6,7 @@ import { makeRng, ValueNoise } from '../util/rng';
 import { drawBoat, drawBush, drawCastle, drawFlowers, drawHangar, drawHouse, drawLighthouse, drawPalm, drawPine, drawTerminal, drawTowerBase, drawTree, drawVillage, drawWindmillBase, type LightSpot } from './decor';
 import { hexA, shade, type Palette } from './palette';
 import { drawPlane } from './planes';
+import { effects as upgradeEffects } from '../game/upgrades';
 
 export interface IslandShape { poly: Vec[]; def: IslandDef; cx: number; cy: number }
 export interface TerrainData {
@@ -212,9 +213,10 @@ function drawTaxiwayAndApron(ctx: Ctx, rw: Runway, apron: Vec, pal: Palette, rng
   ctx.fillStyle = pal.taxiway; ctx.beginPath(); ctx.roundRect(apron.x - 52, apron.y - 30, 104, 60, 14); ctx.fill();
   ctx.fillStyle = shade(pal.taxiway, 0.12); ctx.beginPath(); ctx.roundRect(apron.x - 46, apron.y - 24, 92, 48, 10); ctx.fill();
   // parked aircraft
-  const parked = [PLANE_TYPES.c172, PLANE_TYPES.dhc6];
+  const tier = upgradeEffects().terminalTier;
+  const parked = [PLANE_TYPES.c172, PLANE_TYPES.dhc6, PLANE_TYPES.atr72, PLANE_TYPES.e195].slice(0, 2 + Math.min(2, tier));
   parked.forEach((t, i) => {
-    drawPlane(ctx, { type: t, pos: { x: apron.x - 22 + i * 44, y: apron.y + 2 }, heading: -Math.PI / 2 + (rng() - 0.5) * 0.2, altitude: 0, bank: 0, livery: i, state: 'landed', id: 900 + i }, 0, time === 'night');
+    drawPlane(ctx, { type: t, pos: { x: apron.x - 22 - (parked.length - 2) * 16 + i * 40, y: apron.y + 2 }, heading: -Math.PI / 2 + (rng() - 0.5) * 0.2, altitude: 0, bank: 0, livery: i, state: 'landed', id: 900 + i }, 0, time === 'night');
   });
 }
 
@@ -347,7 +349,13 @@ export function buildTerrain(level: LevelDef, runways: Runway[], W: number, H: n
         case 'village': drawables.push({ y, fn: () => drawVillage(ctx, x, y, pal, lights, irng) }); break;
         case 'lighthouse': drawables.push({ y, fn: () => drawLighthouse(ctx, x, y, pal, lights) }); break;
         case 'tower': drawables.push({ y, fn: () => { beacons.push(drawTowerBase(ctx, x, y, pal, lights)); } }); break;
-        case 'terminal': drawables.push({ y, fn: () => drawTerminal(ctx, x, y, pal, lights) }); break;
+        case 'terminal': {
+          const tier = upgradeEffects().terminalTier;
+          drawables.push({ y, fn: () => { ctx.save(); ctx.translate(x, y); ctx.scale(1 + tier * 0.22, 1 + tier * 0.15); ctx.translate(-x, -y); drawTerminal(ctx, x, y, pal, lights); ctx.restore(); } });
+          if (tier >= 2) drawables.push({ y: y + 40, fn: () => drawHangar(ctx, x - 70, y + 40, pal, lights) });
+          if (tier >= 3) drawables.push({ y: y + 40, fn: () => drawHangar(ctx, x + 70, y + 40, pal, lights) });
+          break;
+        }
         case 'hangar': drawables.push({ y, fn: () => drawHangar(ctx, x, y, pal, lights) }); break;
         case 'windmill': drawables.push({ y, fn: () => { windmills.push(drawWindmillBase(ctx, x, y, pal)); } }); break;
         case 'castle': drawables.push({ y, fn: () => drawCastle(ctx, x, y, pal, lights) }); break;

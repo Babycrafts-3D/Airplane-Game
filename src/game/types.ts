@@ -91,7 +91,7 @@ export interface Snapshot {
   planes: Array<{ id: number; x: number; y: number; h: number; state: PlaneState; alt: number; path: Vec[]; lock: string | null; cross: number }>;
 }
 
-export type EventKind = 'path' | 'lock' | 'nearmiss' | 'crash' | 'goaround' | 'landed' | 'spawn';
+export type EventKind = 'path' | 'lock' | 'nearmiss' | 'crash' | 'goaround' | 'landed' | 'spawn' | 'touchdown';
 export interface GameEvent {
   t: number;
   kind: EventKind;

@@ -87,9 +87,11 @@ export class Renderer {
 
   toWorld = (sx: number, sy: number): Vec => ({ x: (sx - this.ox) / this.scale, y: (sy - this.oy) / this.scale });
 
-  hudHit = (sx: number, sy: number): boolean => {
-    const h = this.hudHits?.pause;
-    return !!h && sx >= h.x && sx <= h.x + h.w && sy >= h.y && sy <= h.y + h.h;
+  hudHit = (sx: number, sy: number): 'pause' | 'slowmo' | null => {
+    const inside = (h?: { x: number; y: number; w: number; h: number }): boolean => !!h && sx >= h.x && sx <= h.x + h.w && sy >= h.y && sy <= h.y + h.h;
+    if (inside(this.hudHits?.pause)) return 'pause';
+    if (inside(this.hudHits?.slowmo)) return 'slowmo';
+    return null;
   };
 
   private worldTransform(): void {
@@ -177,6 +179,12 @@ export class Renderer {
       ctx.restore();
     }
 
+    // slow motion: cool vignette
+    if (world.timeScale < 1) {
+      const g = ctx.createRadialGradient(this.W / 2, this.H / 2, this.H * 0.25, this.W / 2, this.H / 2, this.H * 0.75);
+      g.addColorStop(0, 'rgba(120,180,255,0)'); g.addColorStop(1, 'rgba(60,110,220,0.35)');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, this.W, this.H);
+    }
     // letterbox edges (soft vignette)
     this.screenTransform();
     if (this.ox > 0) {
@@ -272,7 +280,7 @@ export class Renderer {
       for (let j = i + 1; j < air.length; j++) {
         const a = air[i], b = air[j];
         const gap = World.gap(a, b);
-        if (gap > SEP_GAP * 2.2) continue;
+        if (gap > world.fx.radarRange) continue;
         const hot = gap < SEP_GAP;
         const col = hot ? 'rgba(255,90,90,0.95)' : 'rgba(255,200,80,0.9)';
         ctx.strokeStyle = col; ctx.lineWidth = 1.6 * px; ctx.setLineDash([5 * px, 5 * px]);

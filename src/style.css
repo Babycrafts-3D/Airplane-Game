@@ -179,3 +179,33 @@ html, body {
 .tut .step p { margin: 0; font-size: 15px; }
 
 .hidden { display: none !important; }
+
+/* progression UI */
+.statrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-weight: 800; color: var(--ink); }
+.statrow.light { color: #fff; width: min(560px, 100%); margin: 2px 0 8px; text-shadow: 0 2px 8px rgba(0,30,80,.5); }
+.statrow span { display: inline-flex; align-items: center; gap: 6px; }
+.coinbadge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255, 207, 90, 0.18); border: 1px solid rgba(255, 207, 90, 0.5); border-radius: 999px; padding: 4px 12px 4px 6px; font-weight: 900; color: inherit; }
+.lockhint { color: #fff; font-weight: 800; font-size: 12px; margin-top: 6px; text-align: center; text-shadow: 0 2px 6px rgba(0,0,0,.6); }
+.level .lock { flex-direction: column; }
+.mgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; width: min(560px, 100%); }
+.mission { position: relative; border: 0; border-radius: 18px; aspect-ratio: 0.9; font-family: inherit; cursor: pointer; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px; box-shadow: 0 10px 22px rgba(10,40,80,.22), inset 0 1px 0 rgba(255,255,255,.35); transition: transform .12s; background: linear-gradient(180deg, #5cb9ff, #2f8fdc); }
+.mission.t-golden { background: linear-gradient(180deg, #ffbe6a, #ff8f4a); }
+.mission.t-dusk { background: linear-gradient(180deg, #c78fd6, #7a4fb8); }
+.mission.t-night { background: linear-gradient(180deg, #3a5aa8, #142a5e); }
+.mission:active { transform: scale(.95); }
+.mission.locked { background: rgba(255,255,255,.12); box-shadow: none; color: rgba(255,255,255,.7); }
+.mission .mnum { font-size: 24px; font-weight: 900; line-height: 1; text-shadow: 0 2px 6px rgba(0,0,0,.3); }
+.mission .mtag { font-size: 10.5px; font-weight: 800; opacity: .92; text-transform: uppercase; letter-spacing: .04em; }
+.mission .mstars { display: flex; gap: 1px; margin-top: 2px; }
+.mission .mgoal { font-size: 10px; font-weight: 700; opacity: .85; }
+.mission.done::after { content: ''; position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: #7cf7a0; box-shadow: 0 0 8px #7cf7a0; }
+.shoplist { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.shopitem { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 16px; background: #f2f6fb; }
+.shopinfo { flex: 1; min-width: 0; }
+.shopname { font-weight: 900; font-size: 15px; }
+.shopname .tier { color: #e0a400; font-size: 11px; letter-spacing: 2px; margin-left: 6px; }
+.shopdesc { font-size: 13px; color: var(--ink-soft); line-height: 1.35; margin-top: 2px; }
+.shopitem .btn.small { flex: none; min-width: 92px; gap: 6px; }
+.btn[disabled] { opacity: .55; pointer-events: none; }
+.coinsline { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 18px; font-weight: 800; margin: 6px 0 2px; color: #8a5a00; }
+.coinsline b { font-size: 24px; color: var(--ink); }

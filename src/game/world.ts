@@ -4,6 +4,7 @@ import { sfx, haptic } from '../util/audio';
 import { lang, t } from '../i18n';
 import { PLANE_TYPES, runwayAccepts } from './planes';
 import type { GameEvent, LevelDef, Plane, PlaneType, RunwayKind, Snapshot } from './types';
+import { effects as upgradeEffects } from './upgrades';
 
 export const SEP_GAP = 60;      // metres of clear air required between hulls
 export const CRASH_GAP = 10;    // metres: closer than this is a collision
@@ -50,7 +51,15 @@ export class World {
   time = 0;
   landed = 0;
   hearts = 3;
+  maxHearts = 3;
   nearMisses = 0;
+  timeScale = 1;
+  slowmoCharges = 0;
+  slowmoMax = 0;
+  slowmoUntil = -1;
+  coinsEarned = 0;
+  fx = upgradeEffects();
+  onEvent: ((e: GameEvent) => void) | null = null;
   status: WorldStatus = 'running';
   failure: Failure | null = null;
   goalReached = false;
@@ -81,6 +90,10 @@ export class World {
     this.gustNoise = new ValueNoise(level.seed + 5);
     this.windNoise = new ValueNoise(level.seed + 9);
     this.spawnTimer = this.demo ? 0.2 : level.spawn.first;
+    this.maxHearts = this.demo ? 3 : this.fx.hearts;
+    this.hearts = this.maxHearts;
+    this.slowmoMax = this.demo ? 0 : this.fx.slowmoCharges;
+    this.slowmoCharges = this.slowmoMax;
     this.runways = level.runways.map(r => {
       const threshold = { x: r.x * this.W, y: r.y * this.H };
       const dir = fromAngle(r.heading);
@@ -165,6 +178,25 @@ export class World {
     this.status = 'running';
   }
 
+  /** Rewarded-ad revive: one heart back, wreckage cleared, play on. */
+  revive(): void {
+    this.planes = this.planes.filter(p => p.state !== 'crashed');
+    for (const p of this.planes) p.conflictWith.clear();
+    this.hearts = 1;
+    this.failure = null;
+    this.status = 'running';
+    this.toast(t('revive').split(' (')[0], 'good', 2);
+  }
+
+  activateSlowmo(): boolean {
+    if (this.status !== 'running' || this.slowmoCharges <= 0 || this.slowmoUntil > this.time) return false;
+    this.slowmoCharges--;
+    this.slowmoUntil = this.time + 6;
+    this.timeScale = 0.5;
+    sfx.slowmo(true); haptic('medium');
+    return true;
+  }
+
   runwayName(rw: Runway): string {
     return rw.kind === 'short' ? t('rwShort') : rw.kind === 'long' ? t('rwLong') : rw.kind === 'water' ? t('rwWater') : t('rwHeli');
   }
@@ -189,6 +221,8 @@ export class World {
   update(dt: number): void {
     if (this.status !== 'running') return;
     dt = Math.min(dt, 0.05);
+    if (this.slowmoUntil > 0 && this.time >= this.slowmoUntil) { this.slowmoUntil = -1; this.timeScale = 1; sfx.slowmo(false); }
+    dt *= this.timeScale;
     this.time += dt;
     this.updateWind(dt);
     this.spawnLogic(dt);
@@ -390,7 +424,7 @@ export class World {
     }
 
     const vel = fromAngle(p.heading, p.speed);
-    const wind = mul(this.wind.vec, p.type.windSensitivity);
+    const wind = mul(this.wind.vec, p.type.windSensitivity * (this.demo ? 1 : this.fx.windFactor));
     p.pos = add(p.pos, mul(add(vel, wind), dt));
 
     // helicopter: can land when hovering near the pad even without a locked path
@@ -409,8 +443,8 @@ export class World {
     else if (rw.kind !== 'helipad') {
       const align = Math.abs(angleDiff(p.heading, rw.heading));
       const lateral = Math.abs(pointSegment(p.pos, sub(rw.threshold, mul(rw.dir, 300)), rw.end).d);
-      const maxAlign = p.type.cls === 'heavy' ? 0.42 : p.type.cls === 'medium' ? 0.5 : 0.62;
-      if (align > maxAlign || lateral > rw.width * 0.5 + 6) reason = t('misaligned');
+      const maxAlign = (p.type.cls === 'heavy' ? 0.42 : p.type.cls === 'medium' ? 0.5 : 0.62) * this.fx.alignBonus;
+      if (align > maxAlign || lateral > (rw.width * 0.5 + 6) * this.fx.alignBonus) reason = t('misaligned');
     }
     if (reason) {
       // go-around
@@ -425,6 +459,7 @@ export class World {
     p.landingT = 0;
     p.path = [];
     rw.occupiedBy = p.id;
+    this.pushEvent('touchdown', [p.id], p.type.name, { heavy: p.type.cls === 'heavy' || p.type.cls === 'medium' ? 1 : 0 });
     // store the entry offset so we can blend onto the centre line
     (p as unknown as { entryOffset: Vec }).entryOffset = sub(p.pos, rw.threshold);
   }
@@ -454,13 +489,14 @@ export class World {
       p.altitude = clamp(0.35 * (1 - p.landingT / 0.28), 0, 0.35);
       p.bank = lerp(p.bank, 0, 1 - Math.exp(-dt * 4));
       // release the runway for the next arrival once well down the strip
-      if (p.landingT > 0.62 && rw.occupiedBy === p.id) rw.occupiedBy = null;
+      if (p.landingT > this.fx.taxiRelease && rw.occupiedBy === p.id) rw.occupiedBy = null;
     }
     if (p.landingT >= (rw.kind === 'helipad' ? 1 : 0.86)) {
       p.state = 'landed';
       p.landingT = this.time; // reused as "landed at" timestamp for cleanup
       if (rw.occupiedBy === p.id) rw.occupiedBy = null;
       this.landed++;
+      if (!this.demo) this.coinsEarned += Math.round(6 * this.fx.coinMultiplier);
       this.pushEvent('landed', [p.id], `${p.type.name} ${t('landed').toLowerCase()}`);
       this.puffs.push({ pos: { ...p.pos }, t0: this.time, kind: 'land' });
       sfx.landed(); haptic('light');
@@ -519,8 +555,10 @@ export class World {
   }
 
   private pushEvent(kind: GameEvent['kind'], planes: number[], text: string, meta?: Record<string, number | string>): void {
-    this.events.push({ t: this.time, kind, planes, text, meta });
+    const e: GameEvent = { t: this.time, kind, planes, text, meta };
+    this.events.push(e);
     if (this.events.length > 400) this.events.shift();
+    if (this.onEvent && !this.demo) this.onEvent(e);
   }
 
   /** Utility for the renderer: gap between two planes in metres. */

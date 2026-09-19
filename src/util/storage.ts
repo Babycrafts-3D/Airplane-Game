@@ -2,14 +2,24 @@ export interface LevelProgress { best: number; stars: number; completed: boolean
 export interface SaveData {
   levels: Record<string, LevelProgress>;
   sound: boolean;
+  radio: boolean;
+  music: boolean;
   haptics: boolean;
   lang: 'nl' | 'en' | 'auto';
   tutorialSeen: boolean;
+  coins: number;
+  upgrades: Record<string, number>;
+  levelsPlayed: number;
+  lastAdAt: number;
+  totalLanded: number;
 }
 
-const KEY = 'wolkenhaven.save.v1';
+const KEY = 'wolkenhaven.save.v2';
 
-const defaults = (): SaveData => ({ levels: {}, sound: true, haptics: true, lang: 'auto', tutorialSeen: false });
+const defaults = (): SaveData => ({
+  levels: {}, sound: true, radio: true, music: true, haptics: true, lang: 'auto', tutorialSeen: false,
+  coins: 0, upgrades: {}, levelsPlayed: 0, lastAdAt: 0, totalLanded: 0,
+});
 
 export function loadSave(): SaveData {
   try {
@@ -40,3 +50,6 @@ export function recordLevelResult(id: string, landed: number, stars: number, com
   persist();
   return next;
 }
+
+export function addCoins(n: number): void { save.coins = Math.max(0, Math.round(save.coins + n)); persist(); }
+export function upgradeLevel(id: string): number { return save.upgrades[id] ?? 0; }
