@@ -169,7 +169,7 @@ function drawRunway(ctx: Ctx, rw: Runway, pal: Palette, lights: LightSpot[], rl:
   }
   // runway number
   const num = Math.round((((rw.heading * 180 / Math.PI) + 90 + 360) % 360) / 10) || 36;
-  ctx.save(); ctx.translate(58, 0); ctx.rotate(Math.PI / 2);
+  ctx.save(); ctx.translate(58, 0); ctx.rotate(-Math.PI / 2);
   ctx.fillStyle = pal.marking; ctx.font = `bold ${Math.round(w * 0.42)}px Nunito, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(num.toString().padStart(2, '0'), 0, 0);
   ctx.restore();
