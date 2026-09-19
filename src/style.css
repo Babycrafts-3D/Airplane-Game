@@ -215,7 +215,8 @@ html, body {
 @media (min-width: 520px) { .fleetgrid { grid-template-columns: repeat(3, 1fr); } }
 .fleetcard { background: var(--paper); border-radius: 18px; padding: 8px 10px 10px; box-shadow: 0 10px 22px rgba(10,40,80,.18); }
 .fleetcard canvas { width: 100%; height: auto; display: block; background: linear-gradient(180deg, #bfe7ff, #7fc4f0); border-radius: 12px; }
-.fleetcard.locked canvas { filter: grayscale(1) brightness(.8); }
+.fleetcard.locked canvas { opacity: .82; }
+
 .fleetcard .fname { font-weight: 900; font-size: 13px; margin-top: 8px; line-height: 1.15; }
 .fleetcard .fmeta { font-size: 11px; color: var(--ink-soft); font-weight: 700; margin-top: 2px; }
 .fleetcard .fstats { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
