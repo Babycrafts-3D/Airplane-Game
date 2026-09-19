@@ -29,6 +29,7 @@ let last = performance.now();
 let clock = 0;
 let runCoins = 0;
 let revivedThisRun = false;
+let lastThunder = -1;
 
 function makeDemoWorld(): World {
   const unlocked = WORLDS.filter((_, i) => i === 0 || levelProgress(missionId(WORLDS[i - 1].id, 0)).completed);
@@ -206,6 +207,12 @@ function frame(now: number): void {
   engines.setMuted(!audible);
   engines.update(world.planes.filter(p => p.state === 'flying' || p.state === 'landing').map(p => ({ id: p.id, kind: p.type.engines, x: p.pos.x, y: p.pos.y, speed: p.speed, maxSpeed: p.type.speed, altitude: p.altitude, state: p.state })), world.timeScale);
   ambience.update(dt, mode === 'playing' || world.demo ? world.wind.kmh : 0, world.timeScale);
+  ambience.setRain(mode === 'playing' || world.demo ? world.weather.cur.precip : 0);
+  const fl = world.weather.flashes[world.weather.flashes.length - 1];
+  if (fl && fl.t !== lastThunder && (mode === 'playing' || world.demo)) {
+    lastThunder = fl.t;
+    ambience.thunder(Math.min(1, Math.hypot(fl.x - world.W / 2, fl.y - world.H / 2) / world.H));
+  }
   renderer.frame(world, clock, mode === 'playing' || world.demo ? dt * world.timeScale : 0, mode === 'playing' || mode === 'paused');
   requestAnimationFrame(frame);
 }

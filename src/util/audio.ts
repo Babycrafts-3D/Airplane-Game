@@ -135,6 +135,7 @@ export class Ambience {
   private windGain: GainNode | null = null;
   private windFilter: BiquadFilterNode | null = null;
   private musicGain: GainNode | null = null;
+  private rainGain: GainNode | null = null;
   private gullTimer = 0;
   private musicTimer = 0;
   private chord = 0;
@@ -159,6 +160,26 @@ export class Ambience {
     const gust = ctx.createGain(); gust.gain.value = 0.6; wl.connect(wlG).connect(gust.gain); wl.start();
     wind.connect(this.windFilter).connect(gust).connect(this.windGain).connect(master); wind.start();
     this.musicGain = ctx.createGain(); this.musicGain.gain.value = 0; this.musicGain.connect(master);
+    // rain: bright hiss
+    const rain = noiseSource(); if (!rain) return;
+    const rf = ctx.createBiquadFilter(); rf.type = 'highpass'; rf.frequency.value = 2200;
+    this.rainGain = ctx.createGain(); this.rainGain.gain.value = 0;
+    rain.connect(rf).connect(this.rainGain).connect(master); rain.start();
+  }
+
+  setRain(intensity: number): void {
+    if (!ctx || !this.rainGain) return;
+    const on = save.sound && this.mode !== 'off';
+    this.rainGain.gain.setTargetAtTime(on ? intensity * 0.22 : 0, ctx.currentTime, 0.8);
+  }
+
+  thunder(distance01: number): void {
+    if (!ctx || !master || !save.sound || this.mode === 'off') return;
+    const t = ctx.currentTime + 0.15 + distance01 * 1.5;
+    const s = noiseSource(); if (!s) return;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(320, t); f.frequency.exponentialRampToValueAtTime(90, t + 2.5);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.5 * (1 - distance01 * 0.6), t + 0.08); g.gain.exponentialRampToValueAtTime(0.0001, t + 2.8);
+    s.connect(f).connect(g).connect(master); s.start(t); s.stop(t + 3);
   }
 
   setMode(mode: 'menu' | 'game' | 'off', day = true): void {

@@ -79,6 +79,9 @@ const nl: Dict = {
   mission: 'Missie',
   total: 'Totaal',
   mapTitle: 'Wolkenhaven',
+  weatherNav: 'Weernavigatie',
+  forecast: 'Verwachting',
+  now: 'nu',
 };
 
 const en: Dict = {
@@ -158,6 +161,9 @@ const en: Dict = {
   mission: 'Mission',
   total: 'Total',
   mapTitle: 'Wolkenhaven',
+  weatherNav: 'Weather navigation',
+  forecast: 'Forecast',
+  now: 'now',
 };
 
 export function lang(): 'nl' | 'en' {

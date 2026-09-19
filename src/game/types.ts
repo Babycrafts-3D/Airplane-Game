@@ -30,6 +30,11 @@ export interface PlaneType {
   callsign: string;
   military: boolean;
   fuel: number;          // seconds of fuel for urgent (military) arrivals, 0 = no urgency
+  crosswindLimit: number; // km/h demonstrated crosswind limit
+  ils: boolean;           // can fly an instrument approach (land in fog)
+  antiIce: 'none' | 'partial' | 'full';
+  minVis: number;         // metres of visibility needed without ILS
+  seaLimit: number;       // 0..1 sea state a seaplane accepts (0 = n/a)
   tip: string;           // shown in the post-mortem
   tipEn: string;
 }
@@ -73,6 +78,7 @@ export interface LevelDef {
   spawn: { first: number; base: number; min: number; step: number; maxConcurrent: number; maxConcurrentEnd: number };
   wind: WindDef | null;
   clouds: number;
+  weather?: import('./weather').WeatherScript;
 }
 
 export type PlaneState = 'flying' | 'landing' | 'landed' | 'crashed';
@@ -101,6 +107,8 @@ export interface Plane {
   wanderTimer: number;
   fuel: number;          // remaining seconds when urgent, else -1
   urgent: boolean;
+  ice: number;           // 0..1 accumulated ice
+  turbSeed: number;
 }
 
 export interface Snapshot {

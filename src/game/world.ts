@@ -5,6 +5,7 @@ import { lang, t } from '../i18n';
 import { PLANE_TYPES, runwayAccepts } from './planes';
 import type { GameEvent, LevelDef, Plane, PlaneType, RunwayKind, Snapshot } from './types';
 import { effects as upgradeEffects } from './upgrades';
+import { Weather, makeScript } from './weather';
 
 export const SEP_GAP = 60;      // metres of clear air required between hulls
 export const CRASH_GAP = 10;    // metres: closer than this is a collision
@@ -72,6 +73,8 @@ export class World {
   selected: number | null = null;
   selectedUntil = 0;
   wind = { vec: { x: 0, y: 0 }, kmh: 0, dirRad: 0 };
+  weather!: Weather;
+  private lastWxKind = '';
   private rng: () => number;
   private gustNoise: ValueNoise;
   private nextId = 1;
@@ -107,6 +110,8 @@ export class World {
         width,
       };
     });
+    const script = level.weather ?? makeScript(level.wind ? 'breezy' : 'clear', 0, level.wind, level.time === 'night');
+    this.weather = new Weather(script, this.W, this.H, level.seed);
     this.updateWind(0);
   }
 
@@ -170,7 +175,27 @@ export class World {
 
   select(plane: Plane | null): void {
     this.selected = plane ? plane.id : null;
-    this.selectedUntil = this.time + 3.2;
+    this.selectedUntil = plane ? this.time + 1e9 : 0;
+  }
+
+  /** Where this aircraft will actually go in the next seconds, wind and route included. */
+  predictTrack(p: Plane, seconds = 8, step = 0.25): Vec[] {
+    const out: Vec[] = [];
+    let pos = { ...p.pos }, heading = p.heading, idx = p.pathIndex;
+    const sens = p.type.windSensitivity * (this.demo ? 1 : this.fx.windFactor);
+    const speed = p.type.speed * (1 - 0.18 * p.ice);
+    const r = Math.max(13, speed * 0.2, (speed / p.type.turnRate) * 0.55);
+    for (let tt = 0; tt < seconds; tt += step) {
+      let desired = heading;
+      if (p.path.length > 0 && idx < p.path.length) {
+        while (idx < p.path.length - 1 && dist(p.path[idx], pos) < r) idx++;
+        if (idx < p.path.length) desired = rot(pos, p.path[idx]);
+      }
+      heading = turnToward(heading, desired, p.type.turnRate * (1 - 0.3 * p.ice) * step);
+      pos = add(pos, mul(add(fromAngle(heading, speed), mul(this.weather.vec, sens)), step));
+      out.push({ ...pos });
+    }
+    return out;
   }
 
   continueEndless(): void {
@@ -264,15 +289,18 @@ export class World {
   }
 
   private updateWind(dt: number): void {
-    const w = this.level.wind;
-    if (!w) { this.wind = { vec: { x: 0, y: 0 }, kmh: 0, dirRad: 0 }; return; }
-    const n1 = this.gustNoise.noise2(this.time * 0.09, 3.3) * 2 - 1;
-    const n2 = this.gustNoise.noise2(this.time * 0.05, 7.7) * 2 - 1;
-    const kmh = Math.max(0, w.kmh + n1 * w.gust);
-    const dirCompass = w.dirDeg + n2 * w.wander;
-    // compass (0 = up/north, clockwise) → screen radians (0 = east, PI/2 = down)
-    const rad = (dirCompass - 90) * Math.PI / 180;
-    this.wind = { vec: fromAngle(rad, kmh * WIND_UNITS_PER_KMH), kmh, dirRad: rad };
+    this.weather.update(dt, this.time);
+    this.wind = { vec: this.weather.vec, kmh: this.weather.kmhNow, dirRad: this.weather.dirRad };
+    if (!this.demo) {
+      const k = this.weather.kind();
+      if (k !== this.lastWxKind) {
+        if (this.lastWxKind) {
+          const msg: Record<string, [string, string]> = { clear: ['Het klaart op', 'Clearing up'], breezy: ['Wind trekt aan', 'Wind picking up'], rain: ['Regen op komst', 'Rain moving in'], fog: ['Mist trekt binnen', 'Fog rolling in'], storm: ['Onweerscel nadert', 'Storm cell approaching'], ice: ['IJzel: risico op ijsafzetting', 'Freezing rain: icing risk'] };
+          this.toast(msg[k][lang() === 'nl' ? 0 : 1], k === 'clear' ? 'good' : 'warn', 3);
+        }
+        this.lastWxKind = k;
+      }
+    }
   }
 
   // ---------- spawning ----------
@@ -327,7 +355,7 @@ export class World {
         id: this.nextId++, type, pos, heading, speed: type.speed, state: 'flying', path: [], pathIndex: 0,
         lockedRunway: null, pathDrawnAt: -1, landingT: 0, runway: null, altitude: 1, crossTrack: 0,
         spawnedAt: this.time, trail: [], conflictWith: new Set(), bank: 0, livery: Math.floor(this.rng() * 3), goArounds: 0,
-        wanderTimer: 0, fuel: type.fuel > 0 && !this.demo ? type.fuel : -1, urgent: type.fuel > 0 && !this.demo,
+        wanderTimer: 0, fuel: type.fuel > 0 && !this.demo ? type.fuel : -1, urgent: type.fuel > 0 && !this.demo, ice: 0, turbSeed: this.rng() * 100,
       };
       this.planes.push(plane);
       this.puffs.push({ pos: { ...pos }, t0: this.time, kind: 'spawn', dir: heading });
@@ -414,8 +442,23 @@ export class World {
       }
     }
 
+    // weather: turbulence knocks the nose around, ice slows and stiffens the aircraft
+    const wxs = this.weather.sample(p.pos);
+    const sens = p.type.windSensitivity * (this.demo ? 1 : this.fx.windFactor);
+    if (wxs.turb > 0.02) {
+      const n = this.weather['noise'] as ValueNoise;
+      const j = n.noise2(this.time * 1.9 + p.turbSeed, p.turbSeed) * 2 - 1;
+      p.heading += j * wxs.turb * sens * 1.3 * dt;
+      p.bank += j * wxs.turb * sens * 0.6 * dt;
+    }
+    if (!this.demo) {
+      const rate = this.weather.icingRate(p.type);
+      if (rate > 0) { const was = p.ice; p.ice = Math.min(1, p.ice + rate * dt); if (was < 0.5 && p.ice >= 0.5) this.toast(`${p.type.name}: ${lang() === 'nl' ? 'ijsafzetting, trager en stroever' : 'icing, slower and sluggish'}`, 'warn', 3); }
+    }
+    const iceTurn = 1 - 0.3 * p.ice;
+    p.speed = p.type.speed * (1 - 0.18 * p.ice) * (1 + (wxs.turb > 0.02 ? ((this.weather['noise'] as ValueNoise).noise2(this.time * 1.1, p.turbSeed + 9) - 0.5) * 0.16 * wxs.turb * sens : 0));
     const before = p.heading;
-    p.heading = turnToward(p.heading, desired, p.type.turnRate * turnScale * dt);
+    p.heading = turnToward(p.heading, desired, p.type.turnRate * iceTurn * turnScale * dt);
     const turning = angleDiff(before, p.heading) / Math.max(dt, 1e-4);
     p.bank = lerp(p.bank, clamp(turning / p.type.turnRate, -1, 1), 1 - Math.exp(-dt * 5));
 
@@ -446,8 +489,18 @@ export class World {
     const kindOk = runwayAccepts(rw.kind, p.type.cls);
     const busy = rw.occupiedBy !== null && rw.occupiedBy !== p.id;
     let reason: string | null = null;
+    const wx = this.weather;
+    const comp = wx.components(rw.heading);
+    const vis = wx.visibility();
+    const ilsOk = p.type.ils || this.fx.alignBonus > 1;
+    const storm = wx.sample(rw.gate).storm;
+    const NL = lang() === 'nl';
     if (!kindOk) reason = t('tooShort');
     else if (busy) reason = t('runwayBusy');
+    else if (!this.demo && !(vis >= p.type.minVis || (ilsOk && vis >= 300))) reason = NL ? `zicht ${vis} m onder minima` : `visibility ${vis} m below minima`;
+    else if (!this.demo && rw.kind !== 'helipad' && comp.cross > p.type.crosswindLimit) reason = NL ? `zijwind ${Math.round(comp.cross)} km/u boven limiet ${p.type.crosswindLimit}` : `crosswind ${Math.round(comp.cross)} km/h above limit ${p.type.crosswindLimit}`;
+    else if (!this.demo && rw.kind === 'water' && wx.seaState > p.type.seaLimit) reason = NL ? 'golven te hoog' : 'waves too high';
+    else if (!this.demo && storm > 0.45) reason = NL ? 'windschering in de onweerscel' : 'wind shear in the storm cell';
     else if (rw.kind !== 'helipad') {
       const align = Math.abs(angleDiff(p.heading, rw.heading));
       const lateral = Math.abs(pointSegment(p.pos, sub(rw.threshold, mul(rw.dir, 300)), rw.end).d);
@@ -497,9 +550,10 @@ export class World {
       p.altitude = clamp(0.35 * (1 - p.landingT / 0.28), 0, 0.35);
       p.bank = lerp(p.bank, 0, 1 - Math.exp(-dt * 4));
       // release the runway for the next arrival once well down the strip
-      if (p.landingT > this.fx.taxiRelease && rw.occupiedBy === p.id) rw.occupiedBy = null;
+      const roll = this.weather.rollFactor(p.type);
+      if (p.landingT > Math.min(0.9, this.fx.taxiRelease * roll) && rw.occupiedBy === p.id) rw.occupiedBy = null;
     }
-    if (p.landingT >= (rw.kind === 'helipad' ? 1 : 0.86)) {
+    if (p.landingT >= (rw.kind === 'helipad' ? 1 : Math.min(0.97, 0.86 * this.weather.rollFactor(p.type)))) {
       p.state = 'landed';
       p.landingT = this.time; // reused as "landed at" timestamp for cleanup
       if (rw.occupiedBy === p.id) rw.occupiedBy = null;

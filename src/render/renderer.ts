@@ -7,6 +7,7 @@ import { PALETTES, type Palette } from './palette';
 import { drawPlane, drawPlaneLights, drawPlaneShadow, type PlaneView } from './planes';
 import { buildTerrain, type TerrainData } from './terrain';
 import { drawWindmillBlades } from './decor';
+import { WeatherFx } from './weatherfx';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -36,6 +37,7 @@ export class Renderer {
   terrain: TerrainData | null = null;
   clouds: CloudField | null = null;
   windField: WindField | null = null;
+  wxfx: WeatherFx | null = null;
   pal: Palette = PALETTES.morning;
   hudHits: HudHits | null = null;
   safe = { top: 0, bottom: 0, left: 0, right: 0 };
@@ -83,6 +85,7 @@ export class Renderer {
     this.fit(world, true);
     this.clouds = new CloudField(world.level.clouds, this.W, this.H, world.level.seed, this.pal);
     this.windField = new WindField(this.W, this.H);
+    this.wxfx = new WeatherFx(this.W, this.H);
   }
 
   toWorld = (sx: number, sy: number): Vec => ({ x: (sx - this.ox) / this.scale, y: (sy - this.oy) / this.scale });
@@ -116,7 +119,9 @@ export class Renderer {
     drawSeaLife(ctx, this.W, this.H, time, pal, T.islands, world.windNoise);
 
     if (this.clouds) { this.clouds.update(dt, world.wind.vec, this.W, this.H); this.clouds.drawShadows(ctx); }
+    if (this.wxfx) this.wxfx.drawCells(ctx, world.weather, time);
 
+    if (this.wxfx) this.wxfx.drawWetRunways(ctx, world.weather, world.runways, time);
     // approach corridors and gates
     for (const rw of world.runways) this.drawGate(ctx, rw, world, time, px);
 
@@ -127,6 +132,24 @@ export class Renderer {
     // routes
     for (const p of world.planes) if (p.state === 'flying' && p.path.length > 1) this.drawPath(ctx, p, time, px);
 
+    // weather navigation for the selected aircraft: predicted ground track and wind drift
+    const selP = world.selected !== null ? world.planeById(world.selected) : undefined;
+    if (selP && selP.state === 'flying' && !world.demo) {
+      const track = world.predictTrack(selP, 9);
+      ctx.strokeStyle = 'rgba(120,230,255,0.9)'; ctx.lineWidth = 2.2 * px; ctx.setLineDash([3 * px, 6 * px]); ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(selP.pos.x, selP.pos.y); for (const q of track) ctx.lineTo(q.x, q.y); ctx.stroke(); ctx.setLineDash([]);
+      const wv = world.weather.vec, sens = selP.type.windSensitivity * world.fx.windFactor;
+      const wl = Math.hypot(wv.x, wv.y);
+      const L = wl * sens * 3;
+      if (L > 4) {
+        const ux = wv.x / wl, uy = wv.y / wl;
+        const ox = selP.pos.x + ux * (selP.type.hull + 34), oy = selP.pos.y + uy * (selP.type.hull + 34);
+        ctx.strokeStyle = 'rgba(255,220,120,0.95)'; ctx.lineWidth = 3 * px;
+        ctx.beginPath(); ctx.moveTo(ox - ux * L, oy - uy * L); ctx.lineTo(ox, oy); ctx.stroke();
+        ctx.fillStyle = 'rgba(255,220,120,0.95)';
+        ctx.beginPath(); ctx.moveTo(ox + ux * 8 * px, oy + uy * 8 * px); ctx.lineTo(ox - uy * 5 * px, oy + ux * 5 * px); ctx.lineTo(ox + uy * 5 * px, oy - ux * 5 * px); ctx.closePath(); ctx.fill();
+      }
+    }
     // contrails
     for (const p of world.planes) this.drawTrail(ctx, p);
 
@@ -139,6 +162,10 @@ export class Renderer {
     for (const p of sorted) {
       if (p.state === 'crashed') continue;
       drawPlane(ctx, planeView(p), time, pal.lightsOn);
+      if (p.ice > 0.25) {
+        ctx.strokeStyle = `rgba(170,230,255,${0.3 + 0.5 * p.ice})`; ctx.lineWidth = 2 * px;
+        ctx.beginPath(); ctx.arc(p.pos.x, p.pos.y, p.type.hull + 4, 0, TAU); ctx.stroke();
+      }
       if (p.urgent && p.fuel > 0 && p.state === 'flying') {
         const frac = p.fuel / p.type.fuel;
         const r = p.type.hull + RING_EXTRA + 6;
@@ -160,6 +187,7 @@ export class Renderer {
     for (const pf of world.puffs) drawPuff(ctx, pf, world.time, this.W, this.H);
 
     if (this.windField) { this.windField.update(dt, world.wind.vec); this.windField.draw(ctx, world.wind.vec, world.wind.kmh); }
+    if (this.wxfx) this.wxfx.drawPrecip(ctx, world.weather, time, dt);
     if (this.clouds) this.clouds.drawClouds(ctx);
 
     // time-of-day tint
@@ -206,6 +234,8 @@ export class Renderer {
       const g2 = ctx.createLinearGradient(this.sw - this.ox, 0, this.sw - this.ox - 60, 0); g2.addColorStop(0, 'rgba(0,10,30,0.35)'); g2.addColorStop(1, 'rgba(0,10,30,0)');
       ctx.fillStyle = g2; ctx.fillRect(this.sw - this.ox - 60, 0, 60, this.sh);
     }
+
+    if (this.wxfx) { this.wxfx.drawFog(ctx, world.weather, this.sw, this.sh, time, pal); this.wxfx.drawFlash(ctx, this.sw, this.sh); }
 
     if (showHud) {
       const layout: HudLayout = { sw: this.sw, sh: this.sh, safeTop: this.safe.top, safeBottom: this.safe.bottom, safeLeft: this.safe.left, safeRight: this.safe.right, ui: clamp(this.sw / 430, 0.85, 1.5) };

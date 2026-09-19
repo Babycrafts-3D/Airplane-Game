@@ -4,6 +4,9 @@ import { t } from '../i18n';
 import { levelProgress } from '../util/storage';
 import type { Palette } from './palette';
 import { drawHeart, drawPlane, drawPlaneGlyph } from './planes';
+import { advise } from '../game/advisory';
+import { kindLabel } from '../game/weather';
+import { drawWeatherIcon } from './weatherfx';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -68,23 +71,28 @@ export function drawHud(ctx: Ctx, world: World, L: HudLayout, time: number, pal:
   ctx.beginPath(); ctx.roundRect(px + 2 * u, py - 8 * u, 5 * u, 16 * u, 2 * u); ctx.fill();
   const hits: HudHits = { pause: { x: px - pr - 8, y: py - pr - 8, w: pr * 2 + 16, h: pr * 2 + 16 } };
 
-  // --- wind ---
-  if (world.level.wind) {
-    const wx = right - 46 * u - 22 * u, wy = top + 22 * u;
-    const pillW = 110 * u, pillH = 44 * u;
-    roundedCard(ctx, wx - pillW + 22 * u, wy - pillH / 2, pillW, pillH, pillH / 2, pal.hud);
-    const cx = wx - pillW + 22 * u + 22 * u;
-    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5 * u;
-    ctx.beginPath(); ctx.arc(cx, wy, 14 * u, 0, Math.PI * 2); ctx.stroke();
-    ctx.save(); ctx.translate(cx, wy); ctx.rotate(world.wind.dirRad);
-    const gust = 1 + 0.08 * Math.sin(time * 6);
+  // --- weather pill ---
+  {
+    const wx = world.weather;
+    const wy = top + 22 * u;
+    const pillW = 150 * u, pillH = 44 * u;
+    const x0 = right - 44 * u - 10 * u - pillW;
+    roundedCard(ctx, x0, wy - pillH / 2, pillW, pillH, pillH / 2, pal.hud);
+    drawWeatherIcon(ctx, wx.kind(), x0 + 22 * u, wy, 22 * u);
+    // wind arrow
+    const cx = x0 + 50 * u;
+    ctx.save(); ctx.translate(cx, wy); ctx.rotate(wx.dirRad);
     ctx.fillStyle = '#bfe9ff';
-    ctx.beginPath(); ctx.moveTo(12 * u * gust, 0); ctx.lineTo(-6 * u, -7 * u); ctx.lineTo(-2 * u, 0); ctx.lineTo(-6 * u, 7 * u); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(10 * u, 0); ctx.lineTo(-5 * u, -6 * u); ctx.lineTo(-2 * u, 0); ctx.lineTo(-5 * u, 6 * u); ctx.closePath(); ctx.fill();
     ctx.restore();
     ctx.fillStyle = '#fff'; ctx.font = font('900', 15); ctx.textAlign = 'left';
-    ctx.fillText(`${Math.round(world.wind.kmh)}`, cx + 22 * u, wy + 5 * u);
-    ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = font('800', 10);
-    ctx.fillText(t('kmh'), cx + 22 * u + ctx.measureText('00').width * 1.6, wy + 5 * u);
+    ctx.fillText(`${Math.round(wx.kmhNow)}`, cx + 16 * u, wy + 1 * u);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = font('800', 9.5);
+    ctx.fillText(t('kmh'), cx + 16 * u, wy + 12 * u);
+    ctx.fillStyle = '#fff'; ctx.font = font('900', 13); ctx.textAlign = 'right';
+    ctx.fillText(`${Math.round(wx.cur.temp)}°`, x0 + pillW - 12 * u, wy - 2 * u);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = font('800', 9.5);
+    ctx.fillText(kindLabel(wx.kind()), x0 + pillW - 12 * u, wy + 11 * u);
   }
 
   // --- slow-motion button (upgrade) ---
@@ -124,29 +132,71 @@ export function drawHud(ctx: Ctx, world: World, L: HudLayout, time: number, pal:
     ty += h + 8 * u;
   }
 
-  // --- selected aircraft card ---
+  // --- weather navigation panel for the selected aircraft ---
   const sel = world.selected !== null ? world.planeById(world.selected) : undefined;
-  if (sel && world.selectedUntil > world.time && sel.state === 'flying') {
-    const a = Math.min(1, (world.selectedUntil - world.time) / 0.3);
-    const w = Math.min(L.sw - 24 * u - (world.slowmoMax > 0 ? 70 * u : 0), 340 * u), h = 84 * u;
-    const x = (world.slowmoMax > 0 ? L.safeLeft + 12 * u : L.sw / 2 - w / 2), y = L.sh - L.safeBottom - h - 16 * u;
-    ctx.globalAlpha = a;
+  if (sel && sel.state === 'flying' && !world.demo) {
+    const adv = advise(world, sel);
+    const rowsN = adv.rows.length;
+    const w = Math.min(L.sw - 24 * u, 360 * u), h = (96 + rowsN * 17 + 44 + 30) * u;
+    const x = L.safeLeft + 12 * u, y = L.sh - L.safeBottom - h - 16 * u;
     roundedCard(ctx, x, y, w, h, 20 * u, pal.hud);
     ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, w, h, 20 * u); ctx.clip();
-    ctx.translate(x + 44 * u, y + h / 2);
-    const s = (u * 1.25) / Math.max(0.9, sel.type.hull / 22);
+    ctx.translate(x + 40 * u, y + 34 * u);
+    const s = (u * 1.05) / Math.max(0.9, sel.type.hull / 22);
     ctx.scale(s, s);
     drawPlane(ctx, { type: sel.type, pos: { x: 0, y: 0 }, heading: -Math.PI / 2, altitude: 1, bank: 0, livery: sel.livery, state: 'flying', id: sel.id }, time, false);
     ctx.restore();
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#fff'; ctx.font = font('900', 16);
-    ctx.fillText(sel.type.name, x + 90 * u, y + 28 * u);
-    ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.font = font('700', 12.5);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#fff'; ctx.font = font('900', 15);
+    ctx.fillText(sel.type.name, x + 80 * u, y + 24 * u);
+    ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.font = font('700', 11.5);
     const rws = world.runways.filter(r => runwayAccepts(r.kind, sel.type.cls)).map(r => world.runwayName(r));
-    const lands = rws.length ? rws.join(' / ') : '-';
-    ctx.fillText(`${t('speed')}: ${displayKmh(sel.type.speed)} ${t('kmh')}`, x + 90 * u, y + 48 * u);
-    ctx.fillText(`${t('landsOn')}: ${lands}`, x + 90 * u, y + 66 * u);
-    ctx.globalAlpha = 1;
+    ctx.fillText(`${displayKmh(sel.type.speed)} ${t('kmh')} · ${t('landsOn')}: ${rws.join(' / ') || '-'}`, x + 80 * u, y + 42 * u);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = font('800', 9.5);
+    ctx.fillText((t('weatherNav') || 'WEERNAVIGATIE').toUpperCase(), x + 80 * u, y + 58 * u);
+    // rows
+    const colors = ['#7cf7a0', '#ffe27a', '#ffb04d', '#ff6a6a'];
+    let ry = y + 78 * u;
+    for (const r of adv.rows) {
+      ctx.fillStyle = colors[r.level]; ctx.beginPath(); ctx.arc(x + 20 * u, ry - 4 * u, 4 * u, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = font('800', 11);
+      ctx.fillText(r.label, x + 30 * u, ry);
+      ctx.fillStyle = '#fff'; ctx.font = font('700', 11);
+      const lw = ctx.measureText(r.label).width;
+      ctx.fillText(r.value, x + 30 * u + Math.max(lw + 8 * u, 118 * u), ry, w - 30 * u - Math.max(lw + 8 * u, 118 * u) - 10 * u);
+      ry += 17 * u;
+    }
+    // advice
+    ry += 4 * u;
+    const advColor = adv.adviceLevel >= 3 ? 'rgba(200,30,60,0.9)' : adv.adviceLevel >= 1 ? 'rgba(200,130,20,0.9)' : 'rgba(30,150,100,0.9)';
+    ctx.fillStyle = advColor; ctx.beginPath(); ctx.roundRect(x + 12 * u, ry - 6 * u, w - 24 * u, 34 * u, 10 * u); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = font('800', 11);
+    wrapText(ctx, adv.advice, x + 20 * u, ry + 8 * u, w - 40 * u, 13 * u, 2);
+    ry += 40 * u;
+    // forecast strip
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = font('800', 9.5);
+    ctx.fillText((t('forecast') || 'VERWACHTING').toUpperCase(), x + 16 * u, ry + 2 * u);
+    const fx0 = x + 16 * u + 78 * u, step = (w - 16 * u - 78 * u - 10 * u) / adv.forecast.length;
+    adv.forecast.forEach((f, i) => {
+      const fxp = fx0 + i * step + step / 2;
+      drawWeatherIcon(ctx, f.kind, fxp, ry - 6 * u, 14 * u);
+      ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.font = font('800', 9); ctx.textAlign = 'center';
+      ctx.fillText(`${f.at === 0 ? (t('now') || 'nu') : '+' + f.at + 's'} ${f.kmh}`, fxp, ry + 12 * u);
+    });
+    ctx.textAlign = 'left';
   }
   return hits;
+}
+
+function wrapText(ctx: Ctx, text: string, x: number, y: number, maxW: number, lineH: number, maxLines: number): void {
+  const words = text.split(' ');
+  let line = '', lines = 0;
+  for (const wd of words) {
+    const test = line ? `${line} ${wd}` : wd;
+    if (ctx.measureText(test).width > maxW && line) {
+      ctx.fillText(line, x, y + lines * lineH); lines++; line = wd;
+      if (lines >= maxLines - 1) break;
+    } else line = test;
+  }
+  if (lines < maxLines) ctx.fillText(line, x, y + lines * lineH, maxW);
 }

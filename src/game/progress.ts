@@ -2,6 +2,7 @@ import { LEVELS } from './levels';
 import type { LevelDef, TimeOfDay } from './types';
 import { levelProgress } from '../util/storage';
 import { lang } from '../i18n';
+import { makeScript, type WeatherProfile } from './weather';
 
 export const LEVELS_PER_WORLD = 8;
 export const WORLDS = LEVELS; // each island is a world with 8 missions
@@ -96,8 +97,13 @@ export function buildMission(worldIndex: number, index: number): LevelDef & { ta
     ? { ...base.wind, kmh: Math.round(base.wind.kmh * (0.55 + i * 0.09) * (tag === 'storm' ? 1.7 : 1)), gust: Math.round(base.wind.gust * (tag === 'storm' ? 2.2 : 1)), wander: base.wind.wander * (tag === 'storm' ? 1.6 : 1) }
     : (tag === 'storm' ? { kmh: 14, gust: 8, dirDeg: 100 + worldIndex * 40, wander: 20 } : null);
   const tagName = TAG_NAMES[tag][lang() === 'nl' ? 0 : 1];
+  const profile: Record<MissionTag, WeatherProfile> = { calm: 'clear', busy: 'breezy', golden: 'heat', storm: 'storm', dusk: 'fog', heavies: 'showers', night: 'icing', rush: 'front' };
+  // early worlds keep the weather gentle
+  const prof: WeatherProfile = worldIndex === 0 && (tag === 'storm' || tag === 'night') ? (tag === 'storm' ? 'gusty' : 'breezy') : worldIndex === 0 && tag === 'dusk' ? 'clear' : profile[tag];
+  const weather = makeScript(prof, worldIndex, wind, time === 'night');
   return {
     ...base,
+    weather,
     id: missionId(base.id, i),
     name: `${base.name} ${i + 1}`,
     subtitle: tagName, subtitleEn: TAG_NAMES[tag][1],
