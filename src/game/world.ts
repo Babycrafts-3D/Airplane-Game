@@ -1,0 +1,534 @@
+import { add, angleDiff, clamp, dist, fromAngle, lerp, mul, norm, pointSegment, resample, smoothPolyline, sub, turnToward, TAU, type Vec } from '../util/math';
+import { makeRng, ValueNoise } from '../util/rng';
+import { sfx, haptic } from '../util/audio';
+import { lang, t } from '../i18n';
+import { PLANE_TYPES, runwayAccepts } from './planes';
+import type { GameEvent, LevelDef, Plane, PlaneType, RunwayKind, Snapshot } from './types';
+
+export const SEP_GAP = 60;      // metres of clear air required between hulls
+export const CRASH_GAP = 10;    // metres: closer than this is a collision
+export const RING_EXTRA = SEP_GAP / 2; // ring radius = hull + 30, rings touch at 60 m gap
+export const GATE_DIST = 70;    // gate sits this far before the threshold
+export const GATE_R = 52;       // pointer capture radius around the gate
+export const WIND_UNITS_PER_KMH = 0.3;
+export const WORLD_H = 1600;
+
+export interface Runway {
+  id: string;
+  kind: RunwayKind;
+  threshold: Vec;
+  heading: number;
+  dir: Vec;
+  length: number;
+  end: Vec;
+  gate: Vec;
+  occupiedBy: number | null;
+  center: Vec;
+  width: number;
+}
+
+export interface Toast { text: string; until: number; kind: 'info' | 'warn' | 'bad' | 'good' }
+export interface Puff { pos: Vec; t0: number; kind: 'crash' | 'land' | 'spawn' | 'lock'; dir?: number }
+
+export interface Failure {
+  kind: 'crash' | 'hearts';
+  planes: number[];
+  t: number;
+  gap: number;
+}
+
+export type WorldStatus = 'running' | 'failed' | 'complete';
+
+const rot = (a: Vec, b: Vec): number => Math.atan2(b.y - a.y, b.x - a.x);
+
+export class World {
+  W: number;
+  H = WORLD_H;
+  level: LevelDef;
+  planes: Plane[] = [];
+  runways: Runway[] = [];
+  time = 0;
+  landed = 0;
+  hearts = 3;
+  nearMisses = 0;
+  status: WorldStatus = 'running';
+  failure: Failure | null = null;
+  goalReached = false;
+  endless = false;
+  demo = false;
+  events: GameEvent[] = [];
+  snapshots: Snapshot[] = [];
+  toasts: Toast[] = [];
+  puffs: Puff[] = [];
+  selected: number | null = null;
+  selectedUntil = 0;
+  wind = { vec: { x: 0, y: 0 }, kmh: 0, dirRad: 0 };
+  private rng: () => number;
+  private gustNoise: ValueNoise;
+  private nextId = 1;
+  private spawnTimer: number;
+  private snapTimer = 0;
+  private trailTimer = 0;
+  private lastRingConflict = new Map<string, number>();
+  /** fed by the renderer so wind particle field and gusts can share noise */
+  windNoise: ValueNoise;
+
+  constructor(level: LevelDef, worldWidth: number, opts: { demo?: boolean } = {}) {
+    this.level = level;
+    this.W = worldWidth;
+    this.demo = !!opts.demo;
+    this.rng = makeRng(level.seed * 7919 + Math.floor(Math.random() * 1e6));
+    this.gustNoise = new ValueNoise(level.seed + 5);
+    this.windNoise = new ValueNoise(level.seed + 9);
+    this.spawnTimer = this.demo ? 0.2 : level.spawn.first;
+    this.runways = level.runways.map(r => {
+      const threshold = { x: r.x * this.W, y: r.y * this.H };
+      const dir = fromAngle(r.heading);
+      const end = add(threshold, mul(dir, r.length));
+      const width = r.kind === 'long' ? 46 : r.kind === 'short' ? 34 : r.kind === 'water' ? 60 : 44;
+      return {
+        id: r.id, kind: r.kind, threshold, heading: r.heading, dir, length: r.length, end,
+        gate: r.kind === 'helipad' ? { ...threshold } : sub(threshold, mul(dir, GATE_DIST)),
+        occupiedBy: null,
+        center: add(threshold, mul(dir, r.length / 2)),
+        width,
+      };
+    });
+    this.updateWind(0);
+  }
+
+  // ---------- public API used by input/UI ----------
+
+  planeAt(p: Vec, radius = 46): Plane | null {
+    let best: Plane | null = null, bd = radius;
+    for (const pl of this.planes) {
+      if (pl.state !== 'flying') continue;
+      const d = dist(pl.pos, p) - pl.type.hull * 0.5;
+      if (d < bd) { bd = d; best = pl; }
+    }
+    return best;
+  }
+
+  planeById(id: number): Plane | undefined { return this.planes.find(p => p.id === id); }
+
+  beginPath(plane: Plane): void {
+    plane.path = [];
+    plane.pathIndex = 0;
+    plane.lockedRunway = null;
+    plane.pathDrawnAt = this.time;
+    sfx.pathStart();
+  }
+
+  /** Called continuously while drawing. Returns the runway id when the path locks onto a gate. */
+  setPath(plane: Plane, raw: Vec[]): string | null {
+    if (plane.state !== 'flying') return null;
+    const pts = smoothPolyline(resample(raw, 7), 1);
+    plane.path = pts;
+    this.syncPathIndex(plane);
+    const last = raw[raw.length - 1];
+    for (const rw of this.runways) {
+      if (dist(last, rw.gate) > GATE_R) continue;
+      if (!runwayAccepts(rw.kind, plane.type.cls)) {
+        this.toast(`${plane.type.name} ${t('wrongRunwayHint')}`, 'warn', 1.6);
+        return null;
+      }
+      const tail: Vec[] = rw.kind === 'helipad'
+        ? [rw.gate]
+        : [rw.gate, add(rw.threshold, mul(rw.dir, 10))];
+      plane.path = smoothPolyline(resample([...raw, ...tail], 7), 1);
+      // keep the final approach exactly straight so alignment is honest
+      if (rw.kind !== 'helipad') {
+        plane.path.push(add(rw.threshold, mul(rw.dir, 14)));
+      }
+      this.syncPathIndex(plane);
+      plane.lockedRunway = rw.id;
+      this.pushEvent('lock', [plane.id], `${plane.type.name} → ${this.runwayName(rw)}`, { runway: rw.id });
+      this.puffs.push({ pos: { ...rw.gate }, t0: this.time, kind: 'lock' });
+      sfx.pathLock(); haptic('light');
+      return rw.id;
+    }
+    return null;
+  }
+
+  endPath(plane: Plane): void {
+    if (plane.path.length < 2) { plane.path = []; return; }
+    this.pushEvent('path', [plane.id], `${plane.type.name}: route`, { locked: plane.lockedRunway ?? '' });
+  }
+
+  select(plane: Plane | null): void {
+    this.selected = plane ? plane.id : null;
+    this.selectedUntil = this.time + 3.2;
+  }
+
+  continueEndless(): void {
+    this.endless = true;
+    this.status = 'running';
+  }
+
+  runwayName(rw: Runway): string {
+    return rw.kind === 'short' ? t('rwShort') : rw.kind === 'long' ? t('rwLong') : rw.kind === 'water' ? t('rwWater') : t('rwHeli');
+  }
+
+  runwayById(id: string | null): Runway | undefined { return id ? this.runways.find(r => r.id === id) : undefined; }
+
+  maxConcurrent(): number {
+    const s = this.level.spawn;
+    const p = clamp(this.landed / this.level.goal, 0, 1.6);
+    return Math.round(lerp(s.maxConcurrent, s.maxConcurrentEnd, p)) + (this.endless ? Math.floor((this.landed - this.level.goal) / 6) : 0);
+  }
+
+  toast(text: string, kind: Toast['kind'] = 'info', dur = 2.2): void {
+    const last = this.toasts[this.toasts.length - 1];
+    if (last && last.text === text) { last.until = this.time + dur; return; }
+    this.toasts.push({ text, until: this.time + dur, kind });
+    if (this.toasts.length > 3) this.toasts.shift();
+  }
+
+  // ---------- main update ----------
+
+  update(dt: number): void {
+    if (this.status !== 'running') return;
+    dt = Math.min(dt, 0.05);
+    this.time += dt;
+    this.updateWind(dt);
+    this.spawnLogic(dt);
+
+    for (const p of this.planes) this.updatePlane(p, dt);
+
+    if (!this.demo) this.checkSeparation();
+
+    // cleanup
+    this.planes = this.planes.filter(p => !(p.state === 'landed' && this.time - p.landingT > 0.6) && !(p.state === 'crashed' && this.time - p.landingT > 6));
+    this.toasts = this.toasts.filter(tt => tt.until > this.time);
+    this.puffs = this.puffs.filter(pf => this.time - pf.t0 < 3);
+
+    // recording for the post-mortem
+    this.snapTimer += dt; this.trailTimer += dt;
+    if (this.snapTimer >= 0.1) {
+      this.snapTimer = 0;
+      this.snapshots.push({
+        t: this.time,
+        planes: this.planes.map(p => ({ id: p.id, x: p.pos.x, y: p.pos.y, h: p.heading, state: p.state, alt: p.altitude, path: p.path, lock: p.lockedRunway, cross: p.crossTrack })),
+      });
+      if (this.snapshots.length > 160) this.snapshots.shift();
+    }
+    if (this.trailTimer >= 0.09) {
+      this.trailTimer = 0;
+      for (const p of this.planes) {
+        if (p.state === 'flying' || p.state === 'landing') {
+          p.trail.push({ ...p.pos });
+          if (p.trail.length > 34) p.trail.shift();
+        }
+      }
+    }
+
+    if (!this.demo && !this.goalReached && this.landed >= this.level.goal) {
+      this.goalReached = true;
+      this.status = 'complete';
+      sfx.fanfare(); haptic('medium');
+    }
+  }
+
+  private updateWind(dt: number): void {
+    const w = this.level.wind;
+    if (!w) { this.wind = { vec: { x: 0, y: 0 }, kmh: 0, dirRad: 0 }; return; }
+    const n1 = this.gustNoise.noise2(this.time * 0.09, 3.3) * 2 - 1;
+    const n2 = this.gustNoise.noise2(this.time * 0.05, 7.7) * 2 - 1;
+    const kmh = Math.max(0, w.kmh + n1 * w.gust);
+    const dirCompass = w.dirDeg + n2 * w.wander;
+    // compass (0 = up/north, clockwise) → screen radians (0 = east, PI/2 = down)
+    const rad = (dirCompass - 90) * Math.PI / 180;
+    this.wind = { vec: fromAngle(rad, kmh * WIND_UNITS_PER_KMH), kmh, dirRad: rad };
+  }
+
+  // ---------- spawning ----------
+
+  private pickType(): PlaneType {
+    const pool = this.level.planes;
+    const total = pool.reduce((s, p) => s + p.weight, 0);
+    let r = this.rng() * total;
+    for (const p of pool) { r -= p.weight; if (r <= 0) return PLANE_TYPES[p.type]; }
+    return PLANE_TYPES[pool[0].type];
+  }
+
+  private spawnLogic(dt: number): void {
+    this.spawnTimer -= dt;
+    const active = this.planes.filter(p => p.state === 'flying').length;
+    const cap = this.demo ? 5 : this.maxConcurrent();
+    if (this.spawnTimer > 0 || active >= cap) return;
+    if (this.spawn()) {
+      const s = this.level.spawn;
+      const base = Math.max(s.min, s.base - this.landed * s.step);
+      this.spawnTimer = (this.demo ? 4 : base) * (0.85 + this.rng() * 0.3);
+    } else {
+      this.spawnTimer = 0.8;
+    }
+  }
+
+  private spawn(): boolean {
+    const type = this.pickType();
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const side = this.rng();
+      let pos: Vec;
+      if (side < 0.5) pos = { x: lerp(0.08, 0.92, this.rng()) * this.W, y: -70 };
+      else if (side < 0.75) pos = { x: -70, y: lerp(0.04, 0.55, this.rng()) * this.H };
+      else pos = { x: this.W + 70, y: lerp(0.04, 0.55, this.rng()) * this.H };
+      // aim at a random point in the middle band of the sea
+      const target = { x: lerp(0.25, 0.75, this.rng()) * this.W, y: lerp(0.28, 0.5, this.rng()) * this.H };
+      const heading = rot(pos, target);
+      // never spawn into a conflict: check current distance and a few seconds of straight-line prediction
+      let tooClose = false;
+      const vNew = fromAngle(heading, type.speed);
+      for (const o of this.planes) {
+        if (o.state === 'landed' || o.state === 'crashed') continue;
+        const vO = fromAngle(o.heading, o.speed);
+        for (let tt = 0; tt <= 9 && !tooClose; tt += 0.75) {
+          const a = add(pos, mul(vNew, tt)), b = add(o.pos, mul(vO, tt));
+          if (dist(a, b) < 190 + o.type.hull + type.hull) tooClose = true;
+        }
+        if (tooClose) break;
+      }
+      if (tooClose) continue;
+      const plane: Plane = {
+        id: this.nextId++, type, pos, heading, speed: type.speed, state: 'flying', path: [], pathIndex: 0,
+        lockedRunway: null, pathDrawnAt: -1, landingT: 0, runway: null, altitude: 1, crossTrack: 0,
+        spawnedAt: this.time, trail: [], conflictWith: new Set(), bank: 0, livery: Math.floor(this.rng() * 3), goArounds: 0,
+        wanderTimer: 0,
+      };
+      this.planes.push(plane);
+      this.puffs.push({ pos: { ...pos }, t0: this.time, kind: 'spawn', dir: heading });
+      this.pushEvent('spawn', [plane.id], type.name);
+      return true;
+    }
+    return false;
+  }
+
+  // ---------- flight ----------
+
+  private syncPathIndex(plane: Plane): void {
+    if (plane.path.length === 0) { plane.pathIndex = 0; return; }
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < plane.path.length; i++) {
+      const d = dist(plane.path[i], plane.pos);
+      if (d < bd - 0.5) { bd = d; best = i; }
+    }
+    plane.pathIndex = best;
+    this.advanceIndex(plane);
+  }
+
+  private advanceIndex(plane: Plane): void {
+    // big jets cannot turn tightly: accept a waypoint from farther away so they never orbit it
+    const turnRadius = plane.speed / plane.type.turnRate;
+    const r = Math.max(13, plane.speed * 0.2, turnRadius * 0.55);
+    while (plane.pathIndex < plane.path.length - 1 && dist(plane.path[plane.pathIndex], plane.pos) < r) plane.pathIndex++;
+    if (plane.pathIndex >= plane.path.length - 1 && dist(plane.path[plane.path.length - 1], plane.pos) < r) {
+      plane.pathIndex = plane.path.length; // consumed
+    }
+  }
+
+  private updatePlane(p: Plane, dt: number): void {
+    if (p.state === 'crashed' || p.state === 'landed') return;
+    if (p.state === 'landing') { this.updateLanding(p, dt); return; }
+
+    let desired = p.heading;
+    let turnScale = 1;
+    if (p.path.length > 0 && p.pathIndex < p.path.length) {
+      const before = p.pathIndex;
+      this.advanceIndex(p);
+      // stall guard: no progress for a long time means we are circling a waypoint we cannot reach
+      if (p.pathIndex === before) {
+        p.wanderTimer += dt;
+        if (p.wanderTimer > 3.5) { p.pathIndex++; p.wanderTimer = 0; }
+      } else p.wanderTimer = 0;
+      if (p.pathIndex < p.path.length) {
+        const tgt = p.path[Math.min(p.path.length - 1, p.pathIndex)];
+        desired = rot(p.pos, tgt);
+        // cross-track error for wind feedback
+        const i0 = Math.max(0, p.pathIndex - 1);
+        p.crossTrack = pointSegment(p.pos, p.path[i0], p.path[Math.min(p.path.length - 1, i0 + 1)]).d;
+      }
+    }
+    if (p.pathIndex >= p.path.length && p.path.length > 0) {
+      // path consumed
+      const rw = this.runwayById(p.lockedRunway);
+      if (rw) { this.tryLand(p, rw); if (p.state !== 'flying') return; }
+      else { p.path = []; p.crossTrack = 0; }
+    }
+
+    if (p.path.length === 0) {
+      // unguided: fly straight, but turn back gently when leaving the map
+      const m = 30;
+      const out = p.pos.x < -m || p.pos.x > this.W + m || p.pos.y < -m || p.pos.y > this.H + m;
+      const center = { x: this.W / 2, y: this.H * 0.42 };
+      const toC = sub(center, p.pos);
+      const vel = fromAngle(p.heading);
+      if (out && (vel.x * toC.x + vel.y * toC.y) < 0) {
+        desired = rot(p.pos, center) + (this.demo ? 0 : 0.35 * Math.sign(this.rng() - 0.5));
+        turnScale = 0.7;
+      } else if (this.demo) {
+        p.wanderTimer -= dt;
+        if (p.wanderTimer <= 0) { p.wanderTimer = 2 + this.rng() * 3; p.bank = 0; }
+        desired = p.heading + Math.sin(this.time * 0.3 + p.id) * 0.4;
+      }
+    }
+
+    const before = p.heading;
+    p.heading = turnToward(p.heading, desired, p.type.turnRate * turnScale * dt);
+    const turning = angleDiff(before, p.heading) / Math.max(dt, 1e-4);
+    p.bank = lerp(p.bank, clamp(turning / p.type.turnRate, -1, 1), 1 - Math.exp(-dt * 5));
+
+    // a locked final approach: sink gently as the threshold nears
+    const rwL = this.runwayById(p.lockedRunway);
+    if (rwL && rwL.kind !== 'helipad') {
+      const d = dist(p.pos, rwL.threshold);
+      p.altitude = clamp(0.35 + 0.65 * (d / 260), 0.35, 1);
+    } else if (rwL) {
+      const d = dist(p.pos, rwL.threshold);
+      p.altitude = clamp(0.35 + 0.65 * (d / 160), 0.35, 1);
+    } else {
+      p.altitude = lerp(p.altitude, 1, 1 - Math.exp(-dt * 2));
+    }
+
+    const vel = fromAngle(p.heading, p.speed);
+    const wind = mul(this.wind.vec, p.type.windSensitivity);
+    p.pos = add(p.pos, mul(add(vel, wind), dt));
+
+    // helicopter: can land when hovering near the pad even without a locked path
+    if (p.type.cls === 'heli' && p.lockedRunway) {
+      const rw = this.runwayById(p.lockedRunway);
+      if (rw && dist(p.pos, rw.threshold) < 18) this.tryLand(p, rw);
+    }
+  }
+
+  private tryLand(p: Plane, rw: Runway): void {
+    const kindOk = runwayAccepts(rw.kind, p.type.cls);
+    const busy = rw.occupiedBy !== null && rw.occupiedBy !== p.id;
+    let reason: string | null = null;
+    if (!kindOk) reason = t('tooShort');
+    else if (busy) reason = t('runwayBusy');
+    else if (rw.kind !== 'helipad') {
+      const align = Math.abs(angleDiff(p.heading, rw.heading));
+      const lateral = Math.abs(pointSegment(p.pos, sub(rw.threshold, mul(rw.dir, 300)), rw.end).d);
+      const maxAlign = p.type.cls === 'heavy' ? 0.42 : p.type.cls === 'medium' ? 0.5 : 0.62;
+      if (align > maxAlign || lateral > rw.width * 0.5 + 6) reason = t('misaligned');
+    }
+    if (reason) {
+      // go-around
+      p.path = []; p.lockedRunway = null; p.pathIndex = 0; p.goArounds++;
+      this.pushEvent('goaround', [p.id], `${t('goAround')}: ${reason}`, { reason });
+      this.toast(`${t('goAround')} · ${p.type.name}: ${reason}`, 'warn', 2.6);
+      sfx.goAround(); haptic('medium');
+      return;
+    }
+    p.state = 'landing';
+    p.runway = rw.id;
+    p.landingT = 0;
+    p.path = [];
+    rw.occupiedBy = p.id;
+    // store the entry offset so we can blend onto the centre line
+    (p as unknown as { entryOffset: Vec }).entryOffset = sub(p.pos, rw.threshold);
+  }
+
+  private updateLanding(p: Plane, dt: number): void {
+    const rw = this.runwayById(p.runway)!;
+    if (rw.kind === 'helipad') {
+      p.landingT += dt / 1.7;
+      const k = 1 - Math.exp(-dt * 3);
+      p.pos = { x: lerp(p.pos.x, rw.threshold.x, k), y: lerp(p.pos.y, rw.threshold.y, k) };
+      p.speed = lerp(p.speed, 0, k);
+      p.altitude = clamp(0.35 * (1 - p.landingT), 0, 0.35);
+      p.heading += dt * 0.4;
+    } else {
+      // decelerate along the runway
+      const target = p.type.speed * 0.3;
+      p.speed = lerp(p.speed, target, 1 - Math.exp(-dt * 1.3));
+      p.landingT += (p.speed * dt) / rw.length;
+      const along = p.landingT * rw.length;
+      const eo = (p as unknown as { entryOffset: Vec }).entryOffset ?? { x: 0, y: 0 };
+      // lateral component of the entry offset decays over the first third
+      const lat = eo.x * -rw.dir.y + eo.y * rw.dir.x;
+      const blend = Math.max(0, 1 - p.landingT / 0.3);
+      const perp = { x: -rw.dir.y, y: rw.dir.x };
+      p.pos = add(add(rw.threshold, mul(rw.dir, along)), mul(perp, lat * blend));
+      p.heading = turnToward(p.heading, rw.heading, dt * 2.5);
+      p.altitude = clamp(0.35 * (1 - p.landingT / 0.28), 0, 0.35);
+      p.bank = lerp(p.bank, 0, 1 - Math.exp(-dt * 4));
+      // release the runway for the next arrival once well down the strip
+      if (p.landingT > 0.62 && rw.occupiedBy === p.id) rw.occupiedBy = null;
+    }
+    if (p.landingT >= (rw.kind === 'helipad' ? 1 : 0.86)) {
+      p.state = 'landed';
+      p.landingT = this.time; // reused as "landed at" timestamp for cleanup
+      if (rw.occupiedBy === p.id) rw.occupiedBy = null;
+      this.landed++;
+      this.pushEvent('landed', [p.id], `${p.type.name} ${t('landed').toLowerCase()}`);
+      this.puffs.push({ pos: { ...p.pos }, t0: this.time, kind: 'land' });
+      sfx.landed(); haptic('light');
+    }
+  }
+
+  // ---------- separation ----------
+
+  private checkSeparation(): void {
+    const airborne = this.planes.filter(p => p.state === 'flying' || (p.state === 'landing' && p.altitude > 0.12));
+    for (let i = 0; i < airborne.length; i++) {
+      for (let j = i + 1; j < airborne.length; j++) {
+        const a = airborne[i], b = airborne[j];
+        const gap = dist(a.pos, b.pos) - a.type.hull - b.type.hull;
+        const key = a.id < b.id ? `${a.id}-${b.id}` : `${b.id}-${a.id}`;
+        if (gap <= CRASH_GAP) {
+          this.crash(a, b, gap);
+          return;
+        }
+        if (gap < SEP_GAP) {
+          if (!a.conflictWith.has(b.id)) {
+            a.conflictWith.add(b.id); b.conflictWith.add(a.id);
+            this.nearMiss(a, b, gap);
+            if (this.status !== 'running') return;
+          }
+          this.lastRingConflict.set(key, this.time);
+        } else if (gap > SEP_GAP + 25) {
+          if (a.conflictWith.has(b.id)) { a.conflictWith.delete(b.id); b.conflictWith.delete(a.id); }
+        }
+      }
+    }
+  }
+
+  private nearMiss(a: Plane, b: Plane, gap: number): void {
+    this.hearts--;
+    this.nearMisses++;
+    const g = Math.max(0, Math.round(gap));
+    this.pushEvent('nearmiss', [a.id, b.id], `${t('nearMiss')}: ${a.type.name} ${lang() === 'nl' ? 'en' : 'and'} ${b.type.name}, ${g} m`, { gap: g });
+    this.toast(`${t('nearMiss')} · ${g} m`, 'bad', 2.4);
+    sfx.warn(); haptic('heavy');
+    if (this.hearts <= 0) {
+      this.status = 'failed';
+      this.failure = { kind: 'hearts', planes: [a.id, b.id], t: this.time, gap: g };
+    }
+  }
+
+  private crash(a: Plane, b: Plane, gap: number): void {
+    a.state = 'crashed'; b.state = 'crashed';
+    a.landingT = this.time; b.landingT = this.time;
+    const mid = mul(add(a.pos, b.pos), 0.5);
+    this.puffs.push({ pos: mid, t0: this.time, kind: 'crash' });
+    this.pushEvent('crash', [a.id, b.id], `${t('collision')}: ${a.type.name} ${lang() === 'nl' ? 'en' : 'and'} ${b.type.name}`, { gap: Math.max(0, Math.round(gap)) });
+    this.status = 'failed';
+    this.failure = { kind: 'crash', planes: [a.id, b.id], t: this.time, gap: Math.max(0, gap) };
+    sfx.crash(); haptic('heavy');
+  }
+
+  private pushEvent(kind: GameEvent['kind'], planes: number[], text: string, meta?: Record<string, number | string>): void {
+    this.events.push({ t: this.time, kind, planes, text, meta });
+    if (this.events.length > 400) this.events.shift();
+  }
+
+  /** Utility for the renderer: gap between two planes in metres. */
+  static gap(a: Plane, b: Plane): number {
+    return dist(a.pos, b.pos) - a.type.hull - b.type.hull;
+  }
+}
+
+export const compassFromRad = (rad: number): number => ((rad * 180 / Math.PI) + 90 + 360) % 360;
+export const norm2 = norm;
+export const tau = TAU;
